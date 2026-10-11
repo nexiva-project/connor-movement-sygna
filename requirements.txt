@@ -1,5 +1,10 @@
-opencv-python==4.10.0.84
+# Use Python 3.12 (o mediapipe 0.10.21 não tem pacote para 3.13).
+# Se você já tinha o opencv-python instalado, desinstale antes:
+#   pip uninstall -y opencv-python opencv-python-headless
+opencv-contrib-python==4.10.0.84
 mediapipe==0.10.21
 scikit-learn==1.5.2
 joblib==1.4.2
 pandas==2.2.3
+pillow==10.4.0
+numpy<2

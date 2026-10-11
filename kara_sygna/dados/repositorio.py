@@ -1,0 +1,212 @@
+"""Armazenamento dos exemplos de sinais em um arquivo CSV.
+
+Formato: uma linha por quadro, com as colunas ``rotulo``, ``rodada`` e as 126
+características. ``rodada`` identifica a sessão de gravação (um clique em
+"COMEÇAR A ENSINAR"); a validação do modelo usa isso para nunca misturar
+quadros da mesma sessão no treino e no teste.
+"""
+
+from __future__ import annotations
+
+import csv
+import logging
+import os
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Optional
+
+import numpy as np
+import pandas as pd
+
+from kara_sygna import config
+from kara_sygna.visao.caracteristicas import TOTAL_FEATURES, linhas_para_gravar, nomes_features
+
+logger = logging.getLogger(__name__)
+
+COLUNA_ROTULO = "rotulo"
+COLUNA_RODADA = "rodada"
+
+
+class DadosInvalidosError(ValueError):
+    """O CSV existe, mas não tem o formato esperado."""
+
+
+@dataclass(frozen=True)
+class ConjuntoDados:
+    """Todos os exemplos do CSV, já separados para o treinamento.
+
+    Attributes:
+        X: Matriz (n, 126) de características.
+        y: Vetor (n,) com o rótulo (palavra) de cada linha.
+        grupos: Vetor (n,) com a rodada de cada linha.
+    """
+
+    X: np.ndarray
+    y: np.ndarray
+    grupos: np.ndarray
+
+    def __len__(self) -> int:
+        """Quantidade de linhas."""
+        return len(self.y)
+
+    @property
+    def classes(self) -> list[str]:
+        """Rótulos distintos, em ordem alfabética."""
+        return sorted(set(self.y.tolist()))
+
+
+def cabecalho() -> list[str]:
+    """Cabeçalho completo do CSV: rotulo, rodada e as 126 características."""
+    return [COLUNA_ROTULO, COLUNA_RODADA] + nomes_features()
+
+
+def novo_id_rodada() -> int:
+    """Gera o identificador de uma nova rodada de gravação (segundos desde 1970)."""
+    return int(time.time())
+
+
+class RepositorioSinais:
+    """Lê e escreve o CSV de exemplos.
+
+    Args:
+        caminho: Arquivo CSV. Padrão: ``config.ARQUIVO_CSV``.
+    """
+
+    def __init__(self, caminho: Optional[Path] = None) -> None:
+        """Define qual arquivo CSV será usado (veja a classe para o argumento)."""
+        self.caminho = Path(caminho) if caminho is not None else config.ARQUIVO_CSV
+
+    # -- estado do arquivo --------------------------------------------------
+
+    def existe(self) -> bool:
+        """Diz se o CSV existe e tem ao menos o cabeçalho."""
+        return self.caminho.exists() and self.caminho.stat().st_size > 0
+
+    def modificado_em(self) -> float:
+        """Data da última modificação do CSV (``0.0`` se não existir)."""
+        return self.caminho.stat().st_mtime if self.caminho.exists() else 0.0
+
+    def garantir_arquivo(self) -> None:
+        """Cria o CSV (só com o cabeçalho) se ainda não existir."""
+        if self.existe():
+            return
+        self.caminho.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.caminho, "w", newline="", encoding="utf-8") as arquivo:
+            csv.writer(arquivo).writerow(cabecalho())
+        logger.info("CSV criado: %s", self.caminho)
+
+    # -- escrita ------------------------------------------------------------
+
+    def anexar_quadro(self, rotulo: str, rodada: int, vetor: Iterable[float]) -> int:
+        """Grava um quadro (e o seu espelho, se for sinal de uma mão só).
+
+        Args:
+            rotulo: Palavra do sinal.
+            rodada: Identificador da rodada (:func:`novo_id_rodada`).
+            vetor: As 126 características do quadro.
+
+        Returns:
+            Quantas linhas foram gravadas (1 ou 2).
+
+        Raises:
+            ValueError: Se o vetor não tiver 126 valores.
+        """
+        vetor = np.asarray(list(vetor), dtype=np.float64)
+        if vetor.size != TOTAL_FEATURES:
+            raise ValueError(f"O vetor tem {vetor.size} valores; esperava {TOTAL_FEATURES}.")
+
+        linhas = linhas_para_gravar(vetor)
+        with open(self.caminho, "a", newline="", encoding="utf-8") as arquivo:
+            escritor = csv.writer(arquivo)
+            for linha in linhas:
+                escritor.writerow([rotulo, rodada] + [round(float(x), 6) for x in linha])
+        return len(linhas)
+
+    def apagar_sinal(self, rotulo: str) -> int:
+        """Remove todos os exemplos de um sinal.
+
+        Args:
+            rotulo: Palavra a apagar.
+
+        Returns:
+            Quantas linhas foram removidas.
+        """
+        tabela = self._ler_tabela()
+        restantes = tabela[tabela[COLUNA_ROTULO] != rotulo]
+        removidas = len(tabela) - len(restantes)
+        restantes.to_csv(self.caminho, index=False, encoding="utf-8")
+        logger.info("Sinal apagado: %s (%d linhas)", rotulo, removidas)
+        return removidas
+
+    # -- leitura ------------------------------------------------------------
+
+    def _ler_tabela(self) -> pd.DataFrame:
+        """Lê o CSV validando as colunas.
+
+        Raises:
+            FileNotFoundError: Se o arquivo não existir.
+            DadosInvalidosError: Se faltarem colunas ou houver valores vazios.
+        """
+        if not self.existe():
+            raise FileNotFoundError(f"CSV não encontrado: {self.caminho}")
+        tabela = pd.read_csv(self.caminho, dtype={COLUNA_ROTULO: str})
+
+        faltando = [c for c in cabecalho() if c not in tabela.columns]
+        if faltando:
+            raise DadosInvalidosError(
+                f"O CSV está em formato antigo (faltam colunas como '{faltando[0]}'). "
+                "Abra o programa de novo: ele converte o arquivo automaticamente."
+            )
+        if tabela[cabecalho()].isnull().any().any():
+            raise DadosInvalidosError("O CSV contém valores vazios. Corrija ou apague as linhas incompletas.")
+        return tabela
+
+    def carregar(self) -> ConjuntoDados:
+        """Carrega todos os exemplos para o treinamento.
+
+        Raises:
+            FileNotFoundError: Se o CSV não existir.
+            DadosInvalidosError: Se o formato estiver errado.
+        """
+        tabela = self._ler_tabela()
+        return ConjuntoDados(
+            X=tabela[nomes_features()].to_numpy(dtype=np.float64),
+            y=tabela[COLUNA_ROTULO].to_numpy(dtype=str),
+            grupos=tabela[COLUNA_RODADA].to_numpy(),
+        )
+
+    def contagem_por_sinal(self) -> dict[str, int]:
+        """Quantos exemplos existem de cada sinal, em ordem alfabética.
+
+        Returns:
+            Dicionário ``{palavra: quantidade}``; vazio se não houver dados.
+        """
+        if not self.existe():
+            return {}
+        tabela = self._ler_tabela()
+        contagem = tabela[COLUNA_ROTULO].value_counts().sort_index()
+        return {str(palavra): int(qtd) for palavra, qtd in contagem.items()}
+
+    def exemplos_do_sinal(self, rotulo: str) -> np.ndarray:
+        """Devolve os exemplos de um sinal, na ordem em que foram gravados.
+
+        Returns:
+            Matriz (n, 126); com ``n = 0`` se o sinal não existir.
+        """
+        tabela = self._ler_tabela()
+        linhas = tabela[tabela[COLUNA_ROTULO] == rotulo]
+        return linhas[nomes_features()].to_numpy(dtype=np.float64)
+
+
+def remover_arquivo_se_existir(caminho: Path) -> bool:
+    """Apaga um arquivo se ele existir.
+
+    Returns:
+        ``True`` se apagou, ``False`` se não havia o que apagar.
+    """
+    try:
+        os.remove(caminho)
+        return True
+    except FileNotFoundError:
+        return False

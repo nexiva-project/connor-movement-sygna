@@ -1,8 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
 .idea/
 
-# arquivos de CSV e PKL
-**/dados_sinais.csv
-**/modelo_sinais.pkl
-
-# cache
-**/__pycache__/
+# dados e modelos gerados localmente
+armazenamento/*
+!armazenamento/.gitkeep
+dados_sinais*.csv
+modelo_sinais.*
