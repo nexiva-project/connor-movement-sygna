@@ -1,137 +1,90 @@
-# KARA SYGNA PROJECT
+# kara-sygna-py
 
----
+Reconhece sinais feitos com as mãos pela webcam (OpenCV + MediaPipe + scikit-learn).
+Você ensina palavras pela própria janela, treina a IA com um clique e ela escreve o que reconhece.
 
-Projeto de reconhecimento de sinais de mão via câmera, usando Python.
+## Instalação
 
-1. **Preparar o ambiente Python** (`Versão: 3.12.10`)
-2. **Instalar OpenCV e capturar vídeo** (`src/camera.py`)
-3. **Detectar a mão com MediaPipe** (`src/hand_tracker.py`)
-4. **Extrair e organizar os landmarks** (`src/landmarks.py`)
-5. **Reconhecer gestos simples** (`src/contar_dedos.py`)
-6. **Coletar dados para sinais mais específicos** (`src/coletar_dados.py`)
-7. **Treinar um classificador simples** (`src/treinar_modelo.py`)
-8. **Rodar em tempo real e organizar o projeto** (`src/reconhecer_sinais.py`)
+Use **Python 3.12** (o `mediapipe==0.10.21` não tem pacote para 3.13).
 
-## Como configurar o ambiente (rodar na SUA máquina)
-
+**Ubuntu/Debian**
 ```bash
-# 1. Entre na pasta do projeto
-cd kara-sygna-py
-
-# 2. Crie um ambiente virtual
-python -m venv venv
-
-# 3. Instale as dependências
+sudo apt install python3.12-venv python3-tk v4l-utils   # python3-tk é obrigatório para a janela
+python3.12 -m venv .venv && source .venv/bin/activate
+pip uninstall -y opencv-python opencv-python-headless   # só se já instalou antes
 pip install -r requirements.txt
 ```
-
-## Como rodar o Passo 1
-
-```bash
-python src/camera.py
-```
-
-Uma janela deve abrir mostrando sua webcam ao vivo (espelhada, como um espelho).
-Pressione `q` com a janela em foco para fechar.
-
-## Como rodar o Passo 2
-
-```bash
-python src/hand_tracker.py
-```
-
-Mostre a mão para a câmera. Você deve ver 21 pontinhos e linhas desenhados
-sobre os dedos e a palma, seguindo o movimento da mão em tempo real.
-
-## Como rodar o Passo 3
-
-```bash
-python src/landmarks.py
-```
-
-Além de desenhar a mão, o script agora imprime no terminal e mostra na
-tela a posição (x, y, z) da ponta do dedo indicador em tempo real.
-
-## Como rodar o Passo 4
-
-```bash
-python src/contar_dedos.py
-```
-
-Mostre a mão para a câmera e vá levantando/abaixando dedos. O texto na
-tela (e no terminal) deve mostrar quantos dedos estão levantados e
-quais são eles.
-
-## Como rodar o Passo 5
-
-```bash
-python src/coletar_dados.py
-```
-
-O terminal vai pedir o **rótulo** do sinal (ex: `a`, `b`, `joinha`).
-Digite o nome e pressione Enter, faça o sinal na frente da câmera e
-mantenha parado enquanto o script grava 30 amostras automaticamente.
-Depois ele pergunta o próximo rótulo — repita para cada sinal que
-você quiser reconhecer. Pressione Enter vazio para encerrar, ou `q`
-na janela de vídeo. Os dados ficam salvos em `dados_sinais.csv`.
-
-Dica: grave cada sinal em algumas rodadas diferentes (mudando um
-pouco o ângulo e a posição da mão), para o classificador do próximo
-passo aprender melhor.
-
-**Importante**: este script usa `src/utils.py` para
-normalizar os landmarks (posição relativa ao pulso + escala pelo
-tamanho da mão), em vez de coordenadas absolutas. Isso faz o
-reconhecimento funcionar mesmo quando a mão muda de lugar ou de
-distância da câmera. Se você coletou dados com a versão anterior,
-**apague o `dados_sinais.csv` e colete tudo de novo** — os dois
-formatos não são compatíveis entre si.
-
-## Como rodar o Passo 6
-
-```bash
+**Windows (PowerShell)**
+```powershell
+py -3.12 -m venv .venv ; .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python src/treinar_modelo.py
 ```
+No PyCharm: *Settings → Project → Python Interpreter* e aponte para a `.venv`.
 
-O script lê o `dados_sinais.csv` (gerado no Passo 6), separa uma parte
-dos dados para teste, treina um classificador Random Forest e mostra
-um relatório de acurácia (`classification_report`). O modelo treinado
-é salvo em `modelo_sinais.pkl`, que vamos usar no Passo 8.
-
-**Importante**: o arquivo `dados_sinais.csv` precisa estar na mesma
-pasta de onde você roda o comando (a raiz do projeto), já que foi
-esse o local onde o `coletar_dados.py` salvou os dados.
-
-## Como rodar o Passo 7 (final)
+## Como usar
 
 ```bash
-python src/reconhecer_sinais.py
+python main.py            # abre a interface (ou: python -m kara_sygna)
+```
+1. Escreva a palavra, clique em **COMEÇAR A ENSINAR**, faça o sinal e clique em **PARAR**.
+2. Repita **pelo menos 3 vezes por sinal**, mudando posição, distância, inclinação e luz. Cada clique é uma *rodada*, e é isso que permite medir a acurácia de verdade.
+3. Grave também um sinal `neutro` (mão relaxada) para a IA aprender quando *não* há sinal.
+4. **TREINAR IA** (roda em segundo plano) e depois **INICIAR RECONHECIMENTO**.
+
+Sem janela (terminal): `python -m kara_sygna.cli.coletar_dados`, `...cli.treinar_modelo`, `...cli.reconhecer_sinais`.
+
+## Organização
+
+```
+main.py                    abre a interface
+kara_sygna/
+  config.py                todas as constantes e limiares
+  logs.py                  formato dos logs
+  camera/captura.py        abre a webcam (backends por sistema operacional)
+  visao/                   mãos -> números
+    detector_maos.py         MediaPipe + desenho do esqueleto
+    caracteristicas.py       vetor de 126 valores por quadro
+    render_3d.py             desenho 3D da pré-visualização
+    dedos.py                 contagem de dedos (demonstração)
+  dados/                   CSV de exemplos
+    repositorio.py           ler/gravar/apagar sinais
+    migracao.py              converte arquivos de versões antigas
+  ia/                      aprendizado
+    treinamento.py           RandomForest + validação por rodada
+    aumento.py, rotacao.py, geometria.py
+    reconhecimento.py        previsão e votação (Estabilizador)
+    modelo_io.py             salvar/carregar/validar o .pkl
+  aplicacao/               regras do programa, sem Tk
+    controlador.py, previsualizacao.py, erros.py, inicializacao.py
+  interface/               só Tkinter
+    janela_principal.py, janela_sinais.py, janela_previsualizacao.py, janela_log.py
+    tema.py, imagem_tk.py, tarefas.py, iniciar.py
+  cli/                     versões de terminal
+armazenamento/             CSV e modelo gerados (não vão para o git)
+testes/                    pytest (automáticos) e manuais/ (precisam de câmera)
+```
+Regra de dependência: `interface` e `cli` usam `aplicacao`; `aplicacao` usa `ia`, `dados`, `visao`, `camera`; nada embaixo importa Tk.
+
+## Comentários no código (docstrings)
+
+Em Python o equivalente ao Javadoc é a **docstring**: um texto entre `"""` logo abaixo do `def`/`class` (PEP 257). Este projeto usa o estilo Google (`Args:`, `Returns:`, `Raises:`). Elas aparecem no PyCharm com `Ctrl+Q` e em `help(funcao)`.
+
+## Testes
+
+```bash
+pip install -r requirements-dev.txt
+pytest                                      # automáticos, sem câmera
+python -m testes.manuais.teste_camera       # a webcam abre? (--foto f.jpg salva um quadro)
+python -m testes.manuais.teste_deteccao_maos
+python -m testes.manuais.teste_landmarks
+python -m testes.manuais.teste_contar_dedos
 ```
 
-Mostre um dos sinais que você treinou (casa, um, dois, três, quatro,
-cinco) para a câmera. A tela deve mostrar o nome do sinal reconhecido
-e a confiança do modelo (ex: `Sinal: tres (98%)`). Se a confiança for
-baixa, aparece "Incerto" em vez de arriscar um palpite errado.
+## Problemas comuns (Linux)
 
-`câmera → detecção da mão → landmarks → classificador → reconhecimento ao vivo`
-
-Próximos passos possíveis, se quiser continuar evoluindo:
-- Coletar mais amostras por sinal (o modelo aprende melhor com
-  variedade de ângulos e distância da câmera).
-- Adicionar novos sinais rodando o `coletar_dados.py` de novo e
-  re-treinando com o `treinar_modelo.py`.
-- Organizar o código em módulos reutilizáveis (`camera.py`,
-  `hand_tracker.py`, `classifier.py`) em vez de scripts separados por
-  passo.
-- Escrever testes automatizados para a lógica de extração de
-  landmarks e de contagem de dedos (por exemplo, com `pytest`),
-  usando landmarks fixos como dados de teste.
-- Reconhecimento de sinais manuais utilizando IA para tradução em texto
-
-### Problemas comuns
-- **`AttributeError: module 'mediapipe' has no attribute 'solutions'`**: a partir da versão 0.10.31, o Google removeu a API antiga (`mediapipe.solutions`) do pacote. Use a versão fixada no `requirements.txt` (0.10.21), que ainda tem essa API. Se já instalou a versão errada, rode: `pip install mediapipe==0.10.21`
-- **Janela não abre / trava**: confirme que nenhum outro programa (Zoom, Teams, etc.) está usando a câmera.
-- **`cv2.VideoCapture(0)` não encontra a câmera**: tente trocar o `0` por `1` no arquivo `src/camera.py`.
-- **Erro ao instalar opencv-python**: confirme que está usando Python 3.9–3.12 e que o `pip` está atualizado (`pip install --upgrade pip`).
+- **"Não foi possível acessar nenhuma câmera"**: a mensagem lista cada tentativa. Confira `ls /dev/video*`, `v4l2-ctl --list-devices` e se `groups` inclui `video` (senão `sudo usermod -aG video $USER` e entre de novo na sessão). Feche Zoom/Teams/navegador, que podem estar usando a câmera.
+- **`No module named 'tkinter'`**: `sudo apt install python3-tk` (e recrie a `.venv` com o Python do sistema).
+- **`mp.solutions` não existe**: versão errada do MediaPipe. Use Python 3.12 e `mediapipe==0.10.21`.
+- **Dados antigos**: `dados_sinais.csv` e `modelo_sinais.pkl` da raiz (ou de `src/`) são copiados para `armazenamento/` na primeira execução, e o CSV ganha a coluna `rodada` (com backup ao lado).
+- Os números do modelo dependem da proporção da imagem (4:3). A câmera é aberta em 640×480; mude em `config.py` só se for gravar tudo de novo.
+- `INVERTER_LATERALIDADE` em `config.py` define qual mão é "esquerda" nos dados. Se mudar, grave os sinais de novo.
