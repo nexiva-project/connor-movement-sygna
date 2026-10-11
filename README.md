@@ -24,7 +24,7 @@ No PyCharm: *Settings → Project → Python Interpreter* e aponte para a `.venv
 ## Como usar
 
 ```bash
-python main.py            # abre a interface (ou: python -m kara_sygna)
+python app.py            # abre a interface (ou: python -m kara_sygna)
 ```
 1. Escreva a palavra, clique em **COMEÇAR A ENSINAR**, faça o sinal e clique em **PARAR**.
 2. Repita **pelo menos 3 vezes por sinal**, mudando posição, distância, inclinação e luz. Cada clique é uma *rodada*, e é isso que permite medir a acurácia de verdade.
@@ -36,7 +36,7 @@ Sem janela (terminal): `python -m kara_sygna.cli.coletar_dados`, `...cli.treinar
 ## Organização
 
 ```
-main.py                    abre a interface
+app.py                    abre a interface
 kara_sygna/
   config.py                todas as constantes e limiares
   logs.py                  formato dos logs

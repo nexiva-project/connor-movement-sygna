@@ -1,0 +1,12 @@
+# lefthook.yml
+pre-commit:
+  parallel: true
+  commands:
+    linter:
+      glob: "*.py"
+      run: ruff check {staged_files}
+      stage_fixed: true
+    formatter:
+      glob: "*.py"
+      run: ruff format {staged_files}
+      stage_fixed: true

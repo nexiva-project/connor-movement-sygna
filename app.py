@@ -1,6 +1,6 @@
 """Abre o Kara Sygna (interface gráfica).
 
-Uso:  python main.py
+Uso:  python app.py
 """
 
 import sys
