@@ -10,16 +10,14 @@ logger = logging.getLogger(__name__)
 MENSAGEM_SEM_TK = (
     "O Tkinter não está instalado. No Ubuntu/Debian, instale com:\n"
     "    sudo apt install python3-tk\n"
-    "(depois reinicie o programa; se usar uma venv, ela precisa ter sido criada com o Python do sistema)."
+    "(depois reinicie o programa; se usar uma venv, "
+    "ela precisa ter sido criada com o Python do sistema)."
 )
 
 
 def executar() -> int:
-    """Abre o Kara Sygna.
+    """Abre o Kara Sygna."""
 
-    Returns:
-        Código de saída: 0 se encerrou normalmente, 1 se não conseguiu iniciar.
-    """
     try:
         import tkinter as tk
         from tkinter import messagebox
@@ -27,35 +25,77 @@ def executar() -> int:
         print(MENSAGEM_SEM_TK, file=sys.stderr)
         return 1
 
-    # Importados aqui porque dependem do Tk.
     from kara_sygna.aplicacao.controlador import ControladorSinais
     from kara_sygna.aplicacao.inicializacao import preparar_ambiente
     from kara_sygna.camera import CameraIndisponivelError, abrir_camera
     from kara_sygna.interface.janela_principal import JanelaPrincipal
     from kara_sygna.visao.detector_maos import DetectorMaos
+    from kara_sygna.visao.detector_rosto import DetectorRosto
 
     preparar_ambiente()
+
     raiz = tk.Tk()
-    raiz.withdraw()  # só aparece quando câmera e MediaPipe estiverem prontos
+    raiz.withdraw()
+
+    detector_maos = None
+    detector_rosto = None
+    camera = None
 
     try:
-        detector = DetectorMaos()
-    except Exception as erro:
-        logger.error("Falha ao iniciar o MediaPipe", exc_info=erro)
-        messagebox.showerror(
-            "MediaPipe", f"Não foi possível iniciar o MediaPipe:\n\n{erro}"
-        )
-        return 1
+        detector_maos = DetectorMaos()
+        detector_rosto = DetectorRosto()
 
-    try:
         camera = abrir_camera()
+
+        janela = JanelaPrincipal(
+            raiz,
+            ControladorSinais(),
+            camera,
+            detector_maos,
+            detector_rosto,
+        )
+
+        raiz.deiconify()
+        janela.iniciar()
+        return 0
+
     except CameraIndisponivelError as erro:
         logger.error("%s", erro)
-        detector.fechar()
         messagebox.showerror("Câmera", str(erro))
         return 1
 
-    janela = JanelaPrincipal(raiz, ControladorSinais(), camera, detector)
-    raiz.deiconify()
-    janela.iniciar()
-    return 0
+    except Exception as erro:
+        logger.error("Falha ao iniciar o Kara Sygna", exc_info=erro)
+        messagebox.showerror(
+            "Inicialização",
+            f"Não foi possível iniciar o Kara Sygna:\n\n{erro}",
+        )
+        return 1
+
+    finally:
+        if camera is not None:
+            try:
+                camera.liberar()
+            except Exception:
+                logger.exception("Erro ao liberar a câmera")
+
+        if detector_rosto is not None:
+            try:
+                detector_rosto.fechar()
+            except Exception:
+                logger.exception("Erro ao fechar o FaceMesh")
+
+        if detector_maos is not None:
+            try:
+                detector_maos.fechar()
+            except Exception:
+                logger.exception("Erro ao fechar o detector de mãos")
+
+        try:
+            raiz.destroy()
+        except tk.TclError:
+            pass
+
+
+if __name__ == "__main__":
+    sys.exit(executar())
