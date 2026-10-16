@@ -48,6 +48,14 @@ INVERTER_LATERALIDADE = True
 CORES_MAOS_BGR = {"esq": (70, 190, 255), "dir": (150, 105, 255)}
 
 # ---------------------------------------------------------------------------
+# Rosto (FaceMesh)
+# ---------------------------------------------------------------------------
+# True: o face mesh só roda a cada quadro quando uma mão chega perto do rosto;
+# longe dele, só "espia" de tempos em tempos (economiza processamento).
+# False: roda em todos os quadros, como antes.
+ROSTO_SOB_DEMANDA = True
+
+# ---------------------------------------------------------------------------
 # Reconhecimento
 # ---------------------------------------------------------------------------
 CONFIANCA_MINIMA = 0.70  # probabilidade mínima do melhor sinal

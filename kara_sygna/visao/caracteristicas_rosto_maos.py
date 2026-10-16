@@ -2,14 +2,15 @@
 
 Este módulo é independente dos extratores antigos:
 - não altera os 126 valores das mãos;
-- não altera os 1.404 valores faciais;
-- gera um vetor adicional de 72 características.
+- usa os 468 pontos brutos do FaceMesh (resultado_rosto.landmarks), não o
+  vetor facial leve do DetectorRosto;
+- gera um vetor adicional de 82 características.
 
 Layout:
     [rosto presente (1) |
      mãos presentes (2) |
      expressão facial (9) |
-     distâncias dedos-regiões (60)]
+     distâncias dedos-regiões (70)]
 
 As distâncias são relativas à largura do rosto.
 A proximidade não comprova contato físico.
@@ -308,7 +309,7 @@ def extrair_features_rosto_maos(
     largura: int,
     altura: int,
 ) -> np.ndarray:
-    """Extrai 72 características faciais e de proximidade mão-rosto.
+    """Extrai 82 características faciais e de proximidade mão-rosto.
 
     Args:
         resultado_rosto: ResultadoRosto produzido por DetectorRosto.detectar().
@@ -317,7 +318,7 @@ def extrair_features_rosto_maos(
         altura: Altura do quadro usado pelos dois detectores.
 
     Returns:
-        Vetor float32 com exatamente 72 valores.
+        Vetor float32 com exatamente 82 valores.
 
     Nota:
         As mãos são identificadas pela posição horizontal na imagem:

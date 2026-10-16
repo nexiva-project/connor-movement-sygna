@@ -39,6 +39,7 @@ ERROS_DE_USUARIO = (
     TreinoImpossivelError,
     SemDadosError,
 )
+
 PADRAO_VISUAL = {
     "maos_cor_linha_esquerda": "#00D7FF",
     "maos_cor_ponto_esquerda": "#00D7FF",
@@ -54,12 +55,20 @@ PADRAO_VISUAL = {
     "face_cor_regiao_ponto": "#00FFFF",
     "face_cor_regiao_texto": "#00FFFF",
     "face_cor_status": "#00FF00",
+    "face_cor_leve": "#00AAFF",
     "face_espessura_linha": 1,
     "face_tamanho_ponto": 1,
     "face_tamanho_regiao": 4,
     "face_espessura_texto": 1,
+    "face_espessura_leve": 2,
     "video_cor_texto": "#FFFFFF",
     "texto_cor_sinais": "#FFFFFF",
+    # Exibição: esconde o desenho sem afetar a detecção nem a IA.
+    "mostrar_maos": True,
+    "mostrar_rosto": True,
+    "mostrar_linhas_rosto": True,
+    "mostrar_pontos_rosto": True,
+    "mostrar_nomes_rosto": True,
 }
 
 
@@ -147,6 +156,11 @@ class JanelaPrincipal:
             if isinstance(visual, dict):
                 for chave, padrao in PADRAO_VISUAL.items():
                     valor = visual.get(chave, padrao)
+
+                    if isinstance(padrao, bool):
+                        if isinstance(valor, bool):
+                            dados[chave] = valor
+                        continue
 
                     if (
                         chave.endswith("cor_texto")
@@ -291,6 +305,27 @@ class JanelaPrincipal:
             wraplength=500,
         ).pack(pady=(0, 12))
 
+        self._titulo_config(conteudo, "EXIBIÇÃO NA CÂMERA (liga/desliga)")
+        tk.Label(
+            conteudo,
+            text=(
+                "Só esconde o desenho. A detecção e a IA continuam "
+                "funcionando normalmente."
+            ),
+            bg=tema.FUNDO,
+            fg=tema.TEXTO_SUAVE,
+            wraplength=500,
+            justify="left",
+        ).pack(fill="x", padx=20, pady=(0, 6))
+
+        self._controle_interruptor(conteudo, "Mostrar mãos", "mostrar_maos")
+        self._controle_interruptor(conteudo, "Mostrar rosto", "mostrar_rosto")
+        self._controle_interruptor(conteudo, "Linhas do rosto", "mostrar_linhas_rosto")
+        self._controle_interruptor(conteudo, "Pontos do rosto", "mostrar_pontos_rosto")
+        self._controle_interruptor(
+            conteudo, "Nomes e textos do rosto", "mostrar_nomes_rosto"
+        )
+
         self._titulo_config(conteudo, "MÃOS")
         self._controle_cor(
             conteudo, "Linhas da mão esquerda", "maos_cor_linha_esquerda"
@@ -312,6 +347,10 @@ class JanelaPrincipal:
         )
 
         self._titulo_config(conteudo, "ROSTO / FACEMESH")
+        self._controle_cor(conteudo, "Linhas do rosto leve", "face_cor_leve")
+        self._controle_tamanho(
+            conteudo, "Espessura do rosto leve", "face_espessura_leve"
+        )
         self._controle_cor(conteudo, "Malha facial", "face_cor_malha")
         self._controle_cor(conteudo, "Contorno facial", "face_cor_contorno")
         self._controle_cor(conteudo, "Pontos do rosto", "face_cor_ponto")
@@ -331,7 +370,9 @@ class JanelaPrincipal:
             conteudo, "Tamanho dos pontos do rosto", "face_tamanho_ponto"
         )
         self._controle_tamanho(
-            conteudo, "Tamanho dos pontos de referência", "face_tamanho_regiao"
+            conteudo,
+            "Tamanho dos pontos de referência",
+            "face_tamanho_regiao",
         )
         self._controle_tamanho(
             conteudo, "Espessura dos nomes faciais", "face_espessura_texto"
@@ -393,7 +434,7 @@ class JanelaPrincipal:
 
         tk.Button(
             conteudo,
-            text="RESTAURAR CORES E TAMANHOS",
+            text="RESTAURAR CORES, TAMANHOS E EXIBIÇÃO",
             command=self._restaurar_visual,
             bg=tema.FUNDO_PAINEL,
             fg=tema.TEXTO,
@@ -488,6 +529,51 @@ class JanelaPrincipal:
         )
         self._aplicar_cor_texto()
         self._salvar_config_suavizacao()
+
+    def _controle_interruptor(
+        self,
+        mestre: tk.Misc,
+        rotulo: str,
+        chave: str,
+    ) -> None:
+        """Botão liga/desliga: só muda o que aparece na câmera."""
+        linha = tk.Frame(mestre, bg=tema.FUNDO)
+        linha.pack(fill="x", padx=20, pady=3)
+
+        tk.Label(
+            linha,
+            text=rotulo,
+            bg=tema.FUNDO,
+            fg=tema.TEXTO,
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True)
+
+        botao = tk.Button(
+            linha,
+            width=11,
+            relief="flat",
+            fg="#FFFFFF",
+            activeforeground="#FFFFFF",
+            cursor="hand2",
+        )
+        botao.pack(side="right")
+
+        def atualizar_botao() -> None:
+            ligado = bool(self._config_visual.get(chave, True))
+            cor = "#2E7D32" if ligado else "#6B6B6B"
+            botao.configure(
+                text="LIGADO" if ligado else "DESLIGADO",
+                bg=cor,
+                activebackground=cor,
+            )
+
+        def alternar() -> None:
+            self._config_visual[chave] = not bool(self._config_visual.get(chave, True))
+            atualizar_botao()
+            self._salvar_config_suavizacao()
+
+        botao.configure(command=alternar)
+        atualizar_botao()
 
     def _controle_tamanho(
         self,
@@ -927,58 +1013,75 @@ class JanelaPrincipal:
         """Suaviza cópias para desenhar; os dados originais vão para a IA."""
         quadro_original = quadro.copy()
 
-        resultado_rosto = self._detector_rosto.detectar(quadro_original)
         resultado_maos = self._detector.detectar(quadro_original)
+        resultado_rosto = self._detector_rosto.detectar(quadro_original)
 
-        if resultado_rosto.presente and resultado_rosto.landmarks is not None:
-            rosto_visual = copy.deepcopy(resultado_rosto.landmarks)
-            coordenadas = np.asarray(
-                [(p.x, p.y, p.z) for p in rosto_visual.landmark],
-                dtype=np.float32,
-            )
-            suavizadas = self._suavizador_rosto.suavizar("rosto", coordenadas)
+        # Os botões de exibição só escondem o desenho.
+        # A detecção e a IA continuam usando os resultados originais.
+        visual = self._config_visual
 
-            for ponto, coordenada in zip(rosto_visual.landmark, suavizadas):
-                ponto.x, ponto.y, ponto.z = map(float, coordenada)
-
-            resultado_rosto_visual = ResultadoRosto(
-                landmarks=rosto_visual,
-                vetor=resultado_rosto.vetor,
-                presente=True,
-            )
-        else:
-            self._suavizador_rosto.limpar("rosto")
-            resultado_rosto_visual = resultado_rosto
-
-        quadro = self._detector_rosto.desenhar(
-            quadro,
-            resultado_rosto_visual,
-            estilo=self._config_visual,
-        )
-
-        if tem_maos(resultado_maos):
-            resultado_maos_visual = copy.deepcopy(resultado_maos)
-
-            for indice, mao in enumerate(resultado_maos_visual.multi_hand_landmarks):
+        if visual["mostrar_rosto"]:
+            if resultado_rosto.presente and resultado_rosto.landmarks is not None:
+                rosto_visual = copy.deepcopy(resultado_rosto.landmarks)
                 coordenadas = np.asarray(
-                    [(p.x, p.y, p.z) for p in mao.landmark],
+                    [(p.x, p.y, p.z) for p in rosto_visual.landmark],
                     dtype=np.float32,
                 )
-                suavizadas = self._suavizador_maos.suavizar(
-                    f"mao_{indice}", coordenadas
-                )
+                suavizadas = self._suavizador_rosto.suavizar("rosto", coordenadas)
 
-                for ponto, coordenada in zip(mao.landmark, suavizadas):
+                for ponto, coordenada in zip(rosto_visual.landmark, suavizadas):
                     ponto.x, ponto.y, ponto.z = map(float, coordenada)
+
+                resultado_rosto_visual = ResultadoRosto(
+                    landmarks=rosto_visual,
+                    vetor=resultado_rosto.vetor,
+                    presente=True,
+                )
+            else:
+                self._suavizador_rosto.limpar("rosto")
+                resultado_rosto_visual = resultado_rosto
+
+            quadro = self._detector_rosto.desenhar(
+                quadro,
+                resultado_rosto_visual,
+                desenhar_malha=False,
+                desenhar_pontos=visual["mostrar_pontos_rosto"],
+                desenhar_rotulos=visual["mostrar_nomes_rosto"],
+                desenhar_linhas=visual["mostrar_linhas_rosto"],
+                estilo=visual,
+            )
+        else:
+            # Rosto escondido: não suaviza e esquece o histórico.
+            self._suavizador_rosto.limpar("rosto")
+
+        if visual["mostrar_maos"]:
+            if tem_maos(resultado_maos):
+                resultado_maos_visual = copy.deepcopy(resultado_maos)
+
+                for indice, mao in enumerate(
+                    resultado_maos_visual.multi_hand_landmarks
+                ):
+                    coordenadas = np.asarray(
+                        [(p.x, p.y, p.z) for p in mao.landmark],
+                        dtype=np.float32,
+                    )
+                    suavizadas = self._suavizador_maos.suavizar(
+                        f"mao_{indice}", coordenadas
+                    )
+
+                    for ponto, coordenada in zip(mao.landmark, suavizadas):
+                        ponto.x, ponto.y, ponto.z = map(float, coordenada)
+            else:
+                self._suavizador_maos.limpar()
+                resultado_maos_visual = resultado_maos
+
+            self._detector.desenhar(
+                quadro,
+                resultado_maos_visual,
+                estilo=visual,
+            )
         else:
             self._suavizador_maos.limpar()
-            resultado_maos_visual = resultado_maos
-
-        self._detector.desenhar(
-            quadro,
-            resultado_maos_visual,
-            estilo=self._config_visual,
-        )
 
         # A IA continua recebendo o resultado original, não o visual suavizado.
         vetor = (
