@@ -7,7 +7,7 @@ import json
 import logging
 import tkinter as tk
 from pathlib import Path
-from tkinter import colorchooser, messagebox, scrolledtext
+from tkinter import colorchooser, messagebox, scrolledtext, simpledialog
 
 import cv2
 import numpy as np
@@ -124,16 +124,55 @@ class JanelaPrincipal:
         self._log = JanelaLog(raiz)
         self._janela_sinais: JanelaSinais | None = None
         self._janela_previa: JanelaPrevisualizacao | None = None
+        # Estado do Split Button de tamanho da janela.
+        self._tamanho_janela_nome = "Padrão"
+        self._tamanho_personalizado = None
+        self._geometria_antes_tela_cheia = None
+        self._em_tela_cheia = False
+
+        self._texto_tamanho_janela = tk.StringVar(
+            master=raiz,
+            value="TAMANHO: PADRÃO",
+        )
         self._foto = None
         self._encerrado = False
         self._ultimo_erro_quadro = ""
 
         raiz.title("Kara Sygna")
-        raiz.geometry("1250x850")
-        raiz.minsize(1050, 720)
+
+        # Detecta o tamanho do monitor sem alterar a resolução do sistema.
+        largura_tela = raiz.winfo_screenwidth()
+        altura_tela = raiz.winfo_screenheight()
+
+        # Usa quase toda a área disponível, respeitando telas menores.
+        largura_janela = min(
+            largura_tela,
+            max(800, int(largura_tela * 0.96)),
+        )
+        altura_janela = min(
+            altura_tela,
+            max(560, int(altura_tela * 0.92)),
+        )
+
+        # Centraliza a janela no monitor.
+        pos_x = max(0, (largura_tela - largura_janela) // 2)
+        pos_y = max(0, (altura_tela - altura_janela) // 2)
+
+        raiz.geometry(f"{largura_janela}x{altura_janela}+{pos_x}+{pos_y}")
+
+        # Permite diminuir a janela em monitores menores.
+        raiz.minsize(
+            min(800, largura_tela),
+            min(560, altura_tela),
+        )
+
         raiz.protocol("WM_DELETE_WINDOW", self.fechar)
 
         self._palavra = tk.StringVar(master=raiz)
+        self._sinal_atual = tk.StringVar(
+            master=raiz,
+            value="AGUARDANDO SINAL",
+        )
         self._status = tk.StringVar(
             master=raiz,
             value=f"Escolha um modo para começar. ({camera.descricao})",
@@ -667,188 +706,611 @@ class JanelaPrincipal:
         )
 
     def _construir(self) -> None:
-        fundo = tk.Frame(self._raiz, bg=tema.FUNDO)
+        """Monta a interface principal com visual escuro e detalhes em ciano."""
+        self._raiz.configure(bg="#080D18")
+
+        fundo = tk.Frame(self._raiz, bg="#080D18")
         fundo.pack(fill="both", expand=True)
 
-        tk.Label(
-            fundo,
-            text="KARA SYGNA",
-            bg=tema.FUNDO,
-            fg=tema.TEXTO,
-            font=tema.FONTE_TITULO,
-        ).pack(anchor="w", padx=18, pady=(12, 5))
+        # Cabeçalho
+        cabecalho = tk.Frame(fundo, bg="#0D1525", height=76)
+        cabecalho.pack(fill="x")
+        cabecalho.pack_propagate(False)
 
-        superior = tk.Frame(fundo, bg=tema.FUNDO)
-        superior.pack(fill="both", expand=True, padx=15, pady=(0, 8))
+        marca = tk.Frame(cabecalho, bg="#0D1525")
+        marca.pack(side="left", padx=24, pady=10)
+
+        tk.Label(
+            marca,
+            text="◈",
+            bg="#0D1525",
+            fg="#00D7FF",
+            font=("Arial", 27, "bold"),
+        ).pack(side="left", padx=(0, 12))
+
+        textos_marca = tk.Frame(marca, bg="#0D1525")
+        textos_marca.pack(side="left")
+
+        tk.Label(
+            textos_marca,
+            text="KARA SYGNA",
+            bg="#0D1525",
+            fg="#F1F7FF",
+            font=("Arial", 19, "bold"),
+        ).pack(anchor="w")
+
+        tk.Label(
+            textos_marca,
+            text="RECONHECIMENTO DE SINAIS",
+            bg="#0D1525",
+            fg="#7D93B5",
+            font=("Arial", 8, "bold"),
+        ).pack(anchor="w", pady=(2, 0))
+
+        tk.Label(
+            cabecalho,
+            text="●  SISTEMA INICIALIZADO",
+            bg="#0D1525",
+            fg="#5CE1A5",
+            font=("Arial", 9, "bold"),
+        ).pack(side="right", padx=24)
+
+        # Linha decorativa
+        tk.Frame(fundo, bg="#00D7FF", height=2).pack(fill="x")
+
+        # Área principal
+        conteudo = tk.Frame(fundo, bg="#080D18")
+        conteudo.pack(fill="both", expand=True, padx=18, pady=16)
+
+        superior = tk.Frame(conteudo, bg="#080D18")
+        superior.pack(fill="both", expand=True)
 
         self._construir_video(superior)
         self._construir_painel(superior)
-        self._construir_texto(fundo)
+        self._construir_texto(conteudo)
+
+        # Rodapé
+        rodape = tk.Frame(fundo, bg="#0D1525", height=28)
+        rodape.pack(fill="x", side="bottom")
+        rodape.pack_propagate(False)
+
+        tk.Label(
+            rodape,
+            text="KARA SYGNA  •  ACESSIBILIDADE EM LIBRAS",
+            bg="#0D1525",
+            fg="#7186A8",
+            font=("Arial", 8),
+        ).pack(side="left", padx=18, pady=5)
+
+        tk.Label(
+            rodape,
+            text="PROCESSAMENTO LOCAL",
+            bg="#0D1525",
+            fg="#00D7FF",
+            font=("Arial", 8, "bold"),
+        ).pack(side="right", padx=18, pady=5)
+
+    # ----------------------------------------------------- tamanho da janela
+
+    def _abrir_menu_tamanho(self) -> None:
+        """Abre as opções do Split Button abaixo da câmera."""
+        menu = tk.Menu(
+            self._raiz,
+            tearoff=0,
+            bg="#0D1525",
+            fg="#EAF2FF",
+            activebackground="#00BFD9",
+            activeforeground="#07111E",
+            font=("Arial", 10),
+            relief="flat",
+            bd=1,
+        )
+
+        menu.add_command(
+            label="Compacto",
+            command=lambda: self._aplicar_tamanho_janela("Compacto"),
+        )
+        menu.add_command(
+            label="Padrão",
+            command=lambda: self._aplicar_tamanho_janela("Padrão"),
+        )
+        menu.add_command(
+            label="Grande",
+            command=lambda: self._aplicar_tamanho_janela("Grande"),
+        )
+        menu.add_separator()
+        menu.add_command(
+            label="Tela cheia",
+            command=lambda: self._aplicar_tamanho_janela("Tela cheia"),
+        )
+        menu.add_command(
+            label="Personalizado...",
+            command=self._definir_tamanho_personalizado,
+        )
+
+        botao = self._botao_tamanho_seta
+        menu.post(
+            botao.winfo_rootx(),
+            botao.winfo_rooty() + botao.winfo_height(),
+        )
+
+    def _reaplicar_tamanho_janela(self) -> None:
+        """Aplica novamente a opção atualmente selecionada."""
+        self._aplicar_tamanho_janela(self._tamanho_janela_nome)
+
+    def _aplicar_tamanho_janela(self, nome: str) -> None:
+        """Redimensiona a janela sem alterar a resolução do monitor."""
+        largura_tela = self._raiz.winfo_screenwidth()
+        altura_tela = self._raiz.winfo_screenheight()
+
+        if nome == "Tela cheia":
+            if not self._em_tela_cheia:
+                self._geometria_antes_tela_cheia = self._raiz.geometry()
+
+            self._em_tela_cheia = True
+            self._tamanho_janela_nome = nome
+            self._texto_tamanho_janela.set("TAMANHO: TELA CHEIA")
+            self._raiz.attributes("-fullscreen", True)
+            return
+
+        # Sai da tela cheia antes de aplicar outro tamanho.
+        if self._em_tela_cheia:
+            self._raiz.attributes("-fullscreen", False)
+            self._em_tela_cheia = False
+
+        tamanhos = {
+            "Compacto": (1100, 700),
+            "Padrão": (1366, 768),
+            "Grande": (1600, 900),
+        }
+
+        if nome == "Personalizado":
+            if self._tamanho_personalizado is None:
+                return
+            largura, altura = self._tamanho_personalizado
+        else:
+            largura, altura = tamanhos[nome]
+
+        # Nunca ultrapassa as dimensões do monitor.
+        largura = min(largura, largura_tela)
+        altura = min(altura, altura_tela)
+
+        # Centraliza a janela no monitor.
+        pos_x = max(0, (largura_tela - largura) // 2)
+        pos_y = max(0, (altura_tela - altura) // 2)
+
+        self._raiz.geometry(f"{largura}x{altura}+{pos_x}+{pos_y}")
+
+        self._tamanho_janela_nome = nome
+        self._texto_tamanho_janela.set(f"TAMANHO: {nome.upper()}")
+
+    def _definir_tamanho_personalizado(self) -> None:
+        """Permite informar a largura e a altura manualmente."""
+        largura_tela = self._raiz.winfo_screenwidth()
+        altura_tela = self._raiz.winfo_screenheight()
+
+        largura_atual = self._raiz.winfo_width()
+        altura_atual = self._raiz.winfo_height()
+
+        largura = simpledialog.askinteger(
+            "Tamanho personalizado",
+            f"Largura da janela em pixels (800 a {largura_tela}):",
+            parent=self._raiz,
+            initialvalue=min(largura_atual, largura_tela),
+            minvalue=min(800, largura_tela),
+            maxvalue=largura_tela,
+        )
+        if largura is None:
+            return
+
+        altura = simpledialog.askinteger(
+            "Tamanho personalizado",
+            f"Altura da janela em pixels (560 a {altura_tela}):",
+            parent=self._raiz,
+            initialvalue=min(altura_atual, altura_tela),
+            minvalue=min(560, altura_tela),
+            maxvalue=altura_tela,
+        )
+        if altura is None:
+            return
+
+        self._tamanho_personalizado = (largura, altura)
+        self._aplicar_tamanho_janela("Personalizado")
 
     def _construir_video(self, mestre: tk.Misc) -> None:
-        caixa = self._caixa(
+        """Área ampla para a webcam e o rastreamento das mãos e do rosto."""
+        caixa = tk.Frame(
             mestre,
-            " CÂMERA ",
-            tema.FUNDO,
-            font=tema.FONTE_CAIXA,
-            bd=1,
-            relief="solid",
+            bg="#111B2D",
+            highlightbackground="#243651",
+            highlightthickness=1,
         )
-        caixa.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        caixa.pack(side="left", fill="both", expand=True, padx=(0, 14))
 
-        self._area_video = tk.Frame(caixa, bg=tema.FUNDO_VIDEO)
-        self._area_video.pack(fill="both", expand=True, padx=5, pady=5)
+        cabecalho = tk.Frame(caixa, bg="#111B2D")
+        cabecalho.pack(fill="x", padx=16, pady=(14, 10))
+
+        tk.Label(
+            cabecalho,
+            text="VISÃO AO VIVO",
+            bg="#111B2D",
+            fg="#F1F7FF",
+            font=("Arial", 11, "bold"),
+        ).pack(side="left")
+
+        tk.Label(
+            cabecalho,
+            text="● CÂMERA",
+            bg="#111B2D",
+            fg="#5CE1A5",
+            font=("Arial", 9, "bold"),
+        ).pack(side="right")
+
+        tk.Frame(caixa, bg="#243651", height=1).pack(fill="x")
+
+        moldura = tk.Frame(caixa, bg="#050912")
+        moldura.pack(fill="both", expand=True, padx=12, pady=12)
+
+        self._area_video = tk.Frame(moldura, bg="#050912")
+        self._area_video.pack(fill="both", expand=True, padx=2, pady=2)
 
         self._video = tk.Label(
             self._area_video,
-            bg=tema.FUNDO_VIDEO,
-            fg="#aaaaaa",
-            text="Iniciando câmera...",
-            font=("Arial", 14),
+            bg="#050912",
+            fg="#8DA5C7",
+            text="Preparando a câmera...",
+            font=("Arial", 15),
         )
         self._video.place(relx=0.5, rely=0.5, anchor="center")
 
+        legenda = tk.Frame(caixa, bg="#111B2D")
+        legenda.pack(fill="x", padx=16, pady=(0, 12))
+
+        tk.Label(
+            legenda,
+            text="● MÃO ESQUERDA",
+            bg="#111B2D",
+            fg="#00D7FF",
+            font=("Arial", 8, "bold"),
+        ).pack(side="left")
+
+        tk.Label(
+            legenda,
+            text="● MÃO DIREITA",
+            bg="#111B2D",
+            fg="#FF9F43",
+            font=("Arial", 8, "bold"),
+        ).pack(side="left", padx=18)
+
+        # Split Button: tamanho da janela, logo abaixo da câmera.
+        linha_tamanho = tk.Frame(caixa, bg="#111B2D")
+        linha_tamanho.pack(
+            fill="x",
+            padx=12,
+            pady=(0, 12),
+        )
+
+        tk.Label(
+            linha_tamanho,
+            text="VISUALIZAÇÃO",
+            bg="#111B2D",
+            fg="#7186A8",
+            font=("Arial", 8, "bold"),
+        ).pack(side="left", padx=(2, 12))
+
+        grupo_split = tk.Frame(
+            linha_tamanho,
+            bg="#00BFD9",
+            highlightbackground="#00D7FF",
+            highlightthickness=1,
+        )
+        grupo_split.pack(side="left")
+
+        self._botao_tamanho_principal = tk.Button(
+            grupo_split,
+            textvariable=self._texto_tamanho_janela,
+            command=self._reaplicar_tamanho_janela,
+            bg="#13243A",
+            fg="#EAF2FF",
+            activebackground="#1B3954",
+            activeforeground="#FFFFFF",
+            font=("Arial", 9, "bold"),
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            padx=12,
+            pady=7,
+        )
+        self._botao_tamanho_principal.pack(side="left")
+
+        self._botao_tamanho_seta = tk.Button(
+            grupo_split,
+            text="▼",
+            command=self._abrir_menu_tamanho,
+            bg="#00BFD9",
+            fg="#07111E",
+            activebackground="#48E5F5",
+            activeforeground="#07111E",
+            font=("Arial", 9, "bold"),
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            padx=10,
+            pady=7,
+        )
+        self._botao_tamanho_seta.pack(side="left")
+
     def _construir_painel(self, mestre: tk.Misc) -> None:
-        painel = tk.Frame(mestre, bg=tema.FUNDO_PAINEL, width=300)
+        """Painel lateral com sinal reconhecido e controles."""
+        largura_tela = self._raiz.winfo_screenwidth()
+
+        largura_painel = max(
+            270,
+            min(380, int(largura_tela * 0.22)),
+        )
+
+        painel = tk.Frame(
+            mestre,
+            bg="#0D1525",
+            width=largura_painel,
+            highlightbackground="#243651",
+            highlightthickness=1,
+        )
         painel.pack(side="right", fill="y")
         painel.pack_propagate(False)
 
-        ensinar = self._caixa(
+        tk.Label(
             painel,
-            " MODO ENSINAR ",
-            tema.FUNDO_PAINEL,
-            padx=10,
-            pady=10,
+            text="PAINEL DE CONTROLE",
+            bg="#0D1525",
+            fg="#F1F7FF",
+            font=("Arial", 12, "bold"),
+        ).pack(anchor="w", padx=16, pady=(16, 12))
+
+        # Resultado em destaque
+        resultado = tk.Frame(
+            painel,
+            bg="#13243A",
+            highlightbackground="#00AFCB",
+            highlightthickness=1,
         )
-        ensinar.pack(fill="x", padx=10, pady=(10, 8))
+        resultado.pack(fill="x", padx=12, pady=(0, 12))
+
+        tk.Label(
+            resultado,
+            text="SINAL RECONHECIDO",
+            bg="#13243A",
+            fg="#7D93B5",
+            font=("Arial", 8, "bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 5))
+
+        tk.Label(
+            resultado,
+            textvariable=self._sinal_atual,
+            bg="#13243A",
+            fg="#00D7FF",
+            font=("Arial", 19, "bold"),
+            wraplength=255,
+            justify="left",
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 14))
+
+        # Modo de ensino
+        ensinar = tk.Frame(painel, bg="#111B2D")
+        ensinar.pack(fill="x", padx=12, pady=(0, 10))
 
         tk.Label(
             ensinar,
-            text="Palavra do sinal:",
-            bg=tema.FUNDO_PAINEL,
-            fg=tema.TEXTO_SUAVE,
-        ).pack(anchor="w")
+            text="01  /  MODO ENSINAR",
+            bg="#111B2D",
+            fg="#F1F7FF",
+            font=("Arial", 10, "bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 8))
 
-        campo = tk.Entry(ensinar, textvariable=self._palavra, font=("Arial", 11))
-        campo.pack(fill="x", pady=(5, 8))
+        tk.Label(
+            ensinar,
+            text="Nome do sinal",
+            bg="#111B2D",
+            fg="#8DA5C7",
+            font=("Arial", 9),
+        ).pack(anchor="w", padx=12)
+
+        campo = tk.Entry(
+            ensinar,
+            textvariable=self._palavra,
+            font=("Arial", 11),
+            bg="#080D18",
+            fg="#F1F7FF",
+            insertbackground="#00D7FF",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#30415C",
+            highlightcolor="#00D7FF",
+        )
+        campo.pack(fill="x", padx=12, pady=(5, 10), ipady=7)
         campo.bind("<Return>", lambda _e: self._iniciar_ensino())
 
-        tk.Button(
+        self._botao_estilizado(
             ensinar,
-            text="COMEÇAR A ENSINAR",
-            command=self._iniciar_ensino,
-            height=2,
-        ).pack(fill="x")
+            "COMEÇAR A ENSINAR",
+            self._iniciar_ensino,
+            principal=True,
+        ).pack(fill="x", padx=12, pady=(0, 7))
 
-        tk.Button(
+        self._botao_estilizado(
+            ensinar, "PARAR ENSINO / RECONHECIMENTO", self._parar
+        ).pack(fill="x", padx=12, pady=(0, 10))
+
+        self._botao_treinar = self._botao_estilizado(
             ensinar,
-            text="PARAR",
-            command=self._parar,
-        ).pack(fill="x", pady=(5, 0))
-
-        self._botao_treinar = tk.Button(
-            ensinar, text="TREINAR IA", command=self._treinar, height=2
+            "TREINAR IA",
+            self._treinar,
+            principal=True,
         )
-        self._botao_treinar.pack(fill="x", pady=(8, 0))
+        self._botao_treinar.pack(fill="x", padx=12, pady=(0, 12))
 
-        sinal = self._caixa(
-            painel,
-            " MODO SINAL ",
-            tema.FUNDO_PAINEL,
-            padx=10,
-            pady=10,
-        )
-        sinal.pack(fill="x", padx=10, pady=(0, 8))
+        # Reconhecimento
+        sinal = tk.Frame(painel, bg="#111B2D")
+        sinal.pack(fill="x", padx=12, pady=(0, 10))
 
-        tk.Button(
+        tk.Label(
             sinal,
-            text="INICIAR RECONHECIMENTO",
-            command=self._iniciar_reconhecimento,
-            height=2,
-        ).pack(fill="x")
+            text="02  /  MODO SINAL",
+            bg="#111B2D",
+            fg="#F1F7FF",
+            font=("Arial", 10, "bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 8))
 
-        tk.Button(
+        self._botao_estilizado(
             sinal,
-            text="PARAR",
-            command=self._parar,
-        ).pack(fill="x", pady=(5, 0))
+            "INICIAR RECONHECIMENTO",
+            self._iniciar_reconhecimento,
+            principal=True,
+        ).pack(fill="x", padx=12, pady=(0, 7))
 
-        tk.Button(
+        self._botao_estilizado(
             painel,
-            text="ABRIR SINAIS APRENDIDOS",
-            command=self._abrir_sinais,
-            height=2,
-        ).pack(fill="x", padx=10, pady=(2, 4))
+            "SINAIS APRENDIDOS",
+            self._abrir_sinais,
+        ).pack(fill="x", padx=12, pady=(2, 7))
 
-        tk.Button(
+        self._botao_estilizado(
             painel,
-            text="ABRIR LOG",
-            command=self._log.mostrar,
-        ).pack(fill="x", padx=10, pady=(0, 6))
+            "ABRIR LOG",
+            self._log.mostrar,
+        ).pack(fill="x", padx=12, pady=(0, 7))
 
-        tk.Button(
+        self._botao_estilizado(
             painel,
-            text="CONFIGURAÇÕES",
-            command=self._abrir_configuracoes,
-            height=2,
-            bg=tema.FUNDO,
-            fg=tema.TEXTO,
-            activebackground=tema.FUNDO_VIDEO,
-            activeforeground=tema.TEXTO,
-            relief="flat",
-            cursor="hand2",
-        ).pack(fill="x", padx=10, pady=(0, 6))
+            "CONFIGURAÇÕES VISUAIS",
+            self._abrir_configuracoes,
+        ).pack(fill="x", padx=12, pady=(0, 12))
 
-        status = self._caixa(
+        # Status
+        status = tk.Frame(
             painel,
-            " STATUS ",
-            tema.FUNDO_PAINEL,
-            padx=8,
-            pady=8,
+            bg="#080D18",
+            highlightbackground="#243651",
+            highlightthickness=1,
         )
-        status.pack(fill="x", padx=10, pady=(0, 10))
+        status.pack(fill="x", padx=12, pady=(0, 12))
+
+        tk.Label(
+            status,
+            text="STATUS DO SISTEMA",
+            bg="#080D18",
+            fg="#00D7FF",
+            font=("Arial", 9, "bold"),
+        ).pack(anchor="w", padx=10, pady=(10, 5))
 
         tk.Label(
             status,
             textvariable=self._status,
-            bg=tema.FUNDO_PAINEL,
-            fg=tema.TEXTO_SUAVE,
+            bg="#080D18",
+            fg="#A7B8D2",
             justify="left",
             anchor="w",
             wraplength=260,
-        ).pack(fill="x")
+            font=("Arial", 9),
+        ).pack(fill="x", padx=10, pady=(0, 10))
+
+    def _botao_estilizado(
+        self,
+        mestre: tk.Misc,
+        texto: str,
+        comando,
+        principal: bool = False,
+    ) -> tk.Button:
+        """Cria botões consistentes com o tema escuro do Kara Sygna."""
+        fundo = "#00BFD9" if principal else "#1B2940"
+        texto_cor = "#07111E" if principal else "#DCE8FA"
+        hover = "#48E5F5" if principal else "#2A3C58"
+
+        botao = tk.Button(
+            mestre,
+            text=texto,
+            command=comando,
+            bg=fundo,
+            fg=texto_cor,
+            activebackground=hover,
+            activeforeground=texto_cor,
+            disabledforeground="#7186A8",
+            font=("Arial", 9, "bold"),
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            pady=9,
+            wraplength=260,
+        )
+
+        botao.bind(
+            "<Enter>",
+            lambda _evento: botao.configure(
+                bg=hover if botao["state"] != "disabled" else fundo
+            ),
+        )
+        botao.bind(
+            "<Leave>",
+            lambda _evento: botao.configure(bg=fundo),
+        )
+
+        return botao
 
     def _construir_texto(self, mestre: tk.Misc) -> None:
-        caixa = self._caixa(
+        """Área de texto reconhecido, com leitura confortável."""
+        caixa = tk.Frame(
             mestre,
-            " TEXTO DOS SINAIS ",
-            tema.FUNDO,
-            font=("Arial", 11, "bold"),
-            padx=10,
-            pady=10,
+            bg="#111B2D",
+            highlightbackground="#243651",
+            highlightthickness=1,
         )
-        caixa.pack(fill="x", padx=15, pady=(0, 15))
+        caixa.pack(fill="x", pady=(14, 0))
+
+        cabecalho = tk.Frame(caixa, bg="#111B2D")
+        cabecalho.pack(fill="x", padx=14, pady=(12, 8))
+
+        tk.Label(
+            cabecalho,
+            text="TEXTO DOS SINAIS",
+            bg="#111B2D",
+            fg="#F1F7FF",
+            font=("Arial", 11, "bold"),
+        ).pack(side="left")
+
+        tk.Label(
+            cabecalho,
+            text="O texto reconhecido aparece aqui",
+            bg="#111B2D",
+            fg="#7186A8",
+            font=("Arial", 9),
+        ).pack(side="left", padx=12)
 
         cor_texto = self._config_visual["texto_cor_sinais"]
+
         self._texto = scrolledtext.ScrolledText(
             caixa,
             height=4,
             font=tema.FONTE_TEXTO_SINAIS,
-            bg=tema.FUNDO_VIDEO,
+            bg="#080D18",
             fg=cor_texto,
             insertbackground=cor_texto,
+            selectbackground="#164A66",
+            selectforeground="#FFFFFF",
             wrap="word",
             relief="flat",
+            padx=12,
+            pady=10,
+            borderwidth=0,
         )
-        self._texto.pack(fill="both", expand=True)
+        self._texto.pack(fill="both", expand=True, padx=12, pady=(0, 10))
 
-        botoes = tk.Frame(caixa, bg=tema.FUNDO)
-        botoes.pack(fill="x", pady=(8, 0))
+        botoes = tk.Frame(caixa, bg="#111B2D")
+        botoes.pack(fill="x", padx=12, pady=(0, 12))
 
-        tk.Button(
+        self._botao_estilizado(
             botoes,
-            text="LIMPAR TEXTO",
-            command=self._limpar_texto,
+            "LIMPAR TEXTO",
+            self._limpar_texto,
         ).pack(side="right")
 
     # --------------------------------------------------------------- ações
@@ -930,11 +1392,13 @@ class JanelaPrincipal:
     def _adicionar_texto(self, palavra: str) -> None:
         self._texto.insert(tk.END, palavra + " ")
         self._texto.see(tk.END)
+        self._sinal_atual.set(palavra.upper())
         logger.info("Sinal adicionado ao texto: %s", palavra)
 
     def _limpar_texto(self) -> None:
         self._texto.delete("1.0", tk.END)
         self._controlador.limpar_reconhecimento()
+        self._sinal_atual.set("AGUARDANDO SINAL")
 
     # ------------------------------------------------------------ janelas filhas
 
@@ -978,8 +1442,13 @@ class JanelaPrincipal:
     # ------------------------------------------------------------ loop da câmera
 
     def iniciar(self) -> None:
-        self._atualizar_quadro()
+        """Começa a captura e entra no loop do Tkinter."""
+        self.iniciar_captura()
         self._raiz.mainloop()
+
+    def iniciar_captura(self) -> None:
+        """Começa a captura quando o loop do Tkinter já está rodando."""
+        self._atualizar_quadro()
 
     def _atualizar_quadro(self) -> None:
         if self._encerrado:
@@ -1149,15 +1618,28 @@ class JanelaPrincipal:
         )
 
     def _mostrar(self, quadro) -> None:
-        largura = self._area_video.winfo_width()
-        altura = self._area_video.winfo_height()
+        """Adapta a imagem da câmera ao espaço disponível, sem distorção."""
+        try:
+            largura = self._area_video.winfo_width()
+            altura = self._area_video.winfo_height()
 
-        if largura < TAMANHO_MINIMO_PX or altura < TAMANHO_MINIMO_PX:
-            largura = config.LARGURA_AREA_CAMERA
-            altura = config.ALTURA_AREA_CAMERA
+            if largura < TAMANHO_MINIMO_PX or altura < TAMANHO_MINIMO_PX:
+                # Espera o layout terminar de ser calculado.
+                return
 
-        self._foto = quadro_para_foto(quadro, largura, altura)
-        self._video.configure(image=self._foto, text="")
+            self._foto = quadro_para_foto(
+                quadro,
+                largura,
+                altura,
+            )
+            self._video.configure(
+                image=self._foto,
+                text="",
+            )
+
+        except tk.TclError:
+            # A janela pode estar sendo fechada durante a atualização.
+            return
 
     # -------------------------------------------------------------------- fechar
 
