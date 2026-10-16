@@ -7,7 +7,7 @@ import json
 import logging
 import tkinter as tk
 from pathlib import Path
-from tkinter import colorchooser, messagebox, scrolledtext, simpledialog
+from tkinter import colorchooser, messagebox, scrolledtext, simpledialog, ttk
 
 import cv2
 import numpy as np
@@ -20,7 +20,11 @@ from kara_sygna.dados.repositorio import DadosInvalidosError
 from kara_sygna.ia.modelo_io import ModeloInvalidoError
 from kara_sygna.ia.treinamento import ResultadoTreino, TreinoImpossivelError
 from kara_sygna.interface import tema
-from kara_sygna.interface.imagem_tk import TAMANHO_MINIMO_PX, quadro_para_foto
+from kara_sygna.interface.imagem_tk import (
+    TAMANHO_MINIMO_PX,
+    quadro_para_foto,
+    quadro_para_foto_exata,
+)
 from kara_sygna.interface.janela_log import JanelaLog
 from kara_sygna.interface.janela_previsualizacao import JanelaPrevisualizacao
 from kara_sygna.interface.janela_sinais import JanelaSinais
@@ -69,7 +73,46 @@ PADRAO_VISUAL = {
     "mostrar_linhas_rosto": True,
     "mostrar_pontos_rosto": True,
     "mostrar_nomes_rosto": True,
+    # Tamanho da imagem da câmera: "ajustar" ou "LARGURAxALTURA".
+    "video_tamanho": "ajustar",
 }
+
+# Resoluções oferecidas no Split Button de tamanho da janela.
+RESOLUCOES_JANELA = (
+    (640, 480),
+    (720, 480),
+    (800, 600),
+    (1024, 768),
+    (1280, 720),
+    (1366, 768),
+    (1440, 900),
+    (1600, 900),
+    (1680, 1050),
+    (1920, 1080),
+    (2560, 1080),
+    (2560, 1440),
+    (3840, 2160),
+)
+
+# Menor tamanho permitido para a janela (a menor resolução da lista).
+LARGURA_MINIMA_JANELA, ALTURA_MINIMA_JANELA = RESOLUCOES_JANELA[0]
+
+
+def _formatar_resolucao(largura: int, altura: int) -> str:
+    return f"{largura}×{altura}"
+
+
+def _ler_resolucao(valor: object) -> tuple[int, int] | None:
+    """Converte "1280x720" em (1280, 720); None se não for da lista."""
+    if not isinstance(valor, str):
+        return None
+    try:
+        largura, altura = (int(parte) for parte in valor.split("x"))
+    except ValueError:
+        return None
+    if (largura, altura) not in RESOLUCOES_JANELA:
+        return None
+    return largura, altura
 
 
 class JanelaPrincipal:
@@ -125,15 +168,17 @@ class JanelaPrincipal:
         self._janela_sinais: JanelaSinais | None = None
         self._janela_previa: JanelaPrevisualizacao | None = None
         # Estado do Split Button de tamanho da janela.
-        self._tamanho_janela_nome = "Padrão"
-        self._tamanho_personalizado = None
-        self._geometria_antes_tela_cheia = None
+        # Último tamanho escolhido: (largura, altura) ou None para tela cheia.
+        self._tamanho_janela: tuple[int, int] | None = None
         self._em_tela_cheia = False
 
-        self._texto_tamanho_janela = tk.StringVar(
+        self._texto_tamanho_janela = tk.StringVar(master=raiz)
+        self._texto_tamanho_camera = tk.StringVar(
             master=raiz,
-            value="TAMANHO: PADRÃO",
+            value=self._descrever_tamanho_camera(),
         )
+        # Usado ao alternar de "ajustar à área" de volta para um tamanho fixo.
+        self._ultimo_tamanho_camera = self._tamanho_camera() or RESOLUCOES_JANELA[0]
         self._foto = None
         self._encerrado = False
         self._ultimo_erro_quadro = ""
@@ -147,11 +192,11 @@ class JanelaPrincipal:
         # Usa quase toda a área disponível, respeitando telas menores.
         largura_janela = min(
             largura_tela,
-            max(800, int(largura_tela * 0.96)),
+            max(LARGURA_MINIMA_JANELA, int(largura_tela * 0.96)),
         )
         altura_janela = min(
             altura_tela,
-            max(560, int(altura_tela * 0.92)),
+            max(ALTURA_MINIMA_JANELA, int(altura_tela * 0.92)),
         )
 
         # Centraliza a janela no monitor.
@@ -159,14 +204,19 @@ class JanelaPrincipal:
         pos_y = max(0, (altura_tela - altura_janela) // 2)
 
         raiz.geometry(f"{largura_janela}x{altura_janela}+{pos_x}+{pos_y}")
+        self._tamanho_janela = (largura_janela, altura_janela)
+        self._texto_tamanho_janela.set(
+            _formatar_resolucao(largura_janela, altura_janela)
+        )
 
-        # Permite diminuir a janela em monitores menores.
+        # Permite diminuir a janela até a menor resolução da lista.
         raiz.minsize(
-            min(800, largura_tela),
-            min(560, altura_tela),
+            min(LARGURA_MINIMA_JANELA, largura_tela),
+            min(ALTURA_MINIMA_JANELA, altura_tela),
         )
 
         raiz.protocol("WM_DELETE_WINDOW", self.fechar)
+        raiz.bind("<Configure>", self._ao_redimensionar_janela, add="+")
 
         self._palavra = tk.StringVar(master=raiz)
         self._sinal_atual = tk.StringVar(
@@ -198,6 +248,11 @@ class JanelaPrincipal:
 
                     if isinstance(padrao, bool):
                         if isinstance(valor, bool):
+                            dados[chave] = valor
+                        continue
+
+                    if chave == "video_tamanho":
+                        if _ler_resolucao(valor) is not None:
                             dados[chave] = valor
                         continue
 
@@ -363,6 +418,27 @@ class JanelaPrincipal:
         self._controle_interruptor(conteudo, "Pontos do rosto", "mostrar_pontos_rosto")
         self._controle_interruptor(
             conteudo, "Nomes e textos do rosto", "mostrar_nomes_rosto"
+        )
+
+        self._titulo_config(conteudo, "JANELA")
+        linha_janela = tk.Frame(conteudo, bg=tema.FUNDO)
+        linha_janela.pack(fill="x", padx=20, pady=3)
+
+        tk.Label(
+            linha_janela,
+            text="Tamanho da janela",
+            bg=tema.FUNDO,
+            fg=tema.TEXTO,
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True)
+
+        grupo_janela = tk.Frame(linha_janela, bg=tema.FUNDO)
+        grupo_janela.pack(side="right")
+        self._criar_split_button(
+            grupo_janela,
+            self._texto_tamanho_janela,
+            self._reaplicar_tamanho_janela,
+            self._abrir_menu_tamanho,
         )
 
         self._titulo_config(conteudo, "MÃOS")
@@ -668,6 +744,7 @@ class JanelaPrincipal:
             self._abrir_configuracoes()
 
         self._aplicar_cor_texto()
+        self._texto_tamanho_camera.set(self._descrever_tamanho_camera())
 
     def _aplicar_cor_texto(self) -> None:
         """Aplica a cor escolhida à caixa de texto dos sinais."""
@@ -782,6 +859,13 @@ class JanelaPrincipal:
             font=("Arial", 8),
         ).pack(side="left", padx=18, pady=5)
 
+        # Alça no canto inferior direito para redimensionar arrastando.
+        estilo = ttk.Style(self._raiz)
+        estilo.configure("Kara.TSizegrip", background="#0D1525")
+        ttk.Sizegrip(rodape, style="Kara.TSizegrip", cursor="size_nw_se").pack(
+            side="right", anchor="se"
+        )
+
         tk.Label(
             rodape,
             text="PROCESSAMENTO LOCAL",
@@ -792,9 +876,62 @@ class JanelaPrincipal:
 
     # ----------------------------------------------------- tamanho da janela
 
-    def _abrir_menu_tamanho(self) -> None:
-        """Abre as opções do Split Button abaixo da câmera."""
-        menu = tk.Menu(
+    def _criar_split_button(
+        self,
+        mestre: tk.Misc,
+        texto: tk.StringVar,
+        ao_clicar,
+        ao_abrir_menu,
+    ) -> tk.Button:
+        """Cria um Split Button: ação principal à esquerda e menu na seta.
+
+        ``ao_abrir_menu`` recebe o botão da seta, para posicionar o menu.
+        Retorna o botão da seta.
+        """
+        grupo = tk.Frame(
+            mestre,
+            bg="#00BFD9",
+            highlightbackground="#00D7FF",
+            highlightthickness=1,
+        )
+        grupo.pack(side="left")
+
+        tk.Button(
+            grupo,
+            textvariable=texto,
+            command=ao_clicar,
+            bg="#13243A",
+            fg="#EAF2FF",
+            activebackground="#1B3954",
+            activeforeground="#FFFFFF",
+            font=("Arial", 9, "bold"),
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            padx=12,
+            pady=7,
+        ).pack(side="left")
+
+        seta = tk.Button(
+            grupo,
+            text="▼",
+            bg="#00BFD9",
+            fg="#07111E",
+            activebackground="#48E5F5",
+            activeforeground="#07111E",
+            font=("Arial", 9, "bold"),
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            padx=10,
+            pady=7,
+        )
+        seta.configure(command=lambda: ao_abrir_menu(seta))
+        seta.pack(side="left")
+        return seta
+
+    def _novo_menu(self) -> tk.Menu:
+        return tk.Menu(
             self._raiz,
             tearoff=0,
             bg="#0D1525",
@@ -806,70 +943,75 @@ class JanelaPrincipal:
             bd=1,
         )
 
-        menu.add_command(
-            label="Compacto",
-            command=lambda: self._aplicar_tamanho_janela("Compacto"),
+    @staticmethod
+    def _mostrar_menu(menu: tk.Menu, botao: tk.Widget) -> None:
+        """Abre o menu logo abaixo do botão."""
+        menu.post(
+            botao.winfo_rootx(),
+            botao.winfo_rooty() + botao.winfo_height(),
         )
-        menu.add_command(
-            label="Padrão",
-            command=lambda: self._aplicar_tamanho_janela("Padrão"),
-        )
-        menu.add_command(
-            label="Grande",
-            command=lambda: self._aplicar_tamanho_janela("Grande"),
-        )
+
+    def _abrir_menu_tamanho(self, botao: tk.Widget) -> None:
+        """Abre as opções de tamanho da janela (em Configurações)."""
+        menu = self._novo_menu()
+
+        largura_tela = self._raiz.winfo_screenwidth()
+        altura_tela = self._raiz.winfo_screenheight()
+
+        for largura, altura in RESOLUCOES_JANELA:
+            # Resoluções maiores que o monitor não aparecem.
+            if largura > largura_tela or altura > altura_tela:
+                continue
+            menu.add_command(
+                label=_formatar_resolucao(largura, altura),
+                command=lambda l=largura, a=altura: self._aplicar_tamanho_janela(l, a),
+            )
+
         menu.add_separator()
         menu.add_command(
             label="Tela cheia",
-            command=lambda: self._aplicar_tamanho_janela("Tela cheia"),
+            command=self._ativar_tela_cheia,
         )
         menu.add_command(
             label="Personalizado...",
             command=self._definir_tamanho_personalizado,
         )
 
-        botao = self._botao_tamanho_seta
-        menu.post(
-            botao.winfo_rootx(),
-            botao.winfo_rooty() + botao.winfo_height(),
-        )
+        self._mostrar_menu(menu, botao)
 
     def _reaplicar_tamanho_janela(self) -> None:
         """Aplica novamente a opção atualmente selecionada."""
-        self._aplicar_tamanho_janela(self._tamanho_janela_nome)
+        if self._tamanho_janela is None:
+            self._ativar_tela_cheia()
+        else:
+            self._aplicar_tamanho_janela(*self._tamanho_janela)
 
-    def _aplicar_tamanho_janela(self, nome: str) -> None:
+    def _ao_redimensionar_janela(self, evento: tk.Event) -> None:
+        """Mostra no botão o tamanho real quando a janela é arrastada."""
+        # A raiz repassa o <Configure> de todos os widgets; só a janela importa.
+        if evento.widget is not self._raiz or self._em_tela_cheia:
+            return
+
+        tamanho = (evento.width, evento.height)
+        if tamanho != self._tamanho_janela:
+            self._tamanho_janela = tamanho
+            self._texto_tamanho_janela.set(_formatar_resolucao(*tamanho))
+
+    def _ativar_tela_cheia(self) -> None:
+        self._em_tela_cheia = True
+        self._tamanho_janela = None
+        self._texto_tamanho_janela.set("TELA CHEIA")
+        self._raiz.attributes("-fullscreen", True)
+
+    def _aplicar_tamanho_janela(self, largura: int, altura: int) -> None:
         """Redimensiona a janela sem alterar a resolução do monitor."""
         largura_tela = self._raiz.winfo_screenwidth()
         altura_tela = self._raiz.winfo_screenheight()
-
-        if nome == "Tela cheia":
-            if not self._em_tela_cheia:
-                self._geometria_antes_tela_cheia = self._raiz.geometry()
-
-            self._em_tela_cheia = True
-            self._tamanho_janela_nome = nome
-            self._texto_tamanho_janela.set("TAMANHO: TELA CHEIA")
-            self._raiz.attributes("-fullscreen", True)
-            return
 
         # Sai da tela cheia antes de aplicar outro tamanho.
         if self._em_tela_cheia:
             self._raiz.attributes("-fullscreen", False)
             self._em_tela_cheia = False
-
-        tamanhos = {
-            "Compacto": (1100, 700),
-            "Padrão": (1366, 768),
-            "Grande": (1600, 900),
-        }
-
-        if nome == "Personalizado":
-            if self._tamanho_personalizado is None:
-                return
-            largura, altura = self._tamanho_personalizado
-        else:
-            largura, altura = tamanhos[nome]
 
         # Nunca ultrapassa as dimensões do monitor.
         largura = min(largura, largura_tela)
@@ -881,23 +1023,25 @@ class JanelaPrincipal:
 
         self._raiz.geometry(f"{largura}x{altura}+{pos_x}+{pos_y}")
 
-        self._tamanho_janela_nome = nome
-        self._texto_tamanho_janela.set(f"TAMANHO: {nome.upper()}")
+        self._tamanho_janela = (largura, altura)
+        self._texto_tamanho_janela.set(_formatar_resolucao(largura, altura))
 
     def _definir_tamanho_personalizado(self) -> None:
         """Permite informar a largura e a altura manualmente."""
         largura_tela = self._raiz.winfo_screenwidth()
         altura_tela = self._raiz.winfo_screenheight()
+        largura_minima = min(LARGURA_MINIMA_JANELA, largura_tela)
+        altura_minima = min(ALTURA_MINIMA_JANELA, altura_tela)
 
         largura_atual = self._raiz.winfo_width()
         altura_atual = self._raiz.winfo_height()
 
         largura = simpledialog.askinteger(
             "Tamanho personalizado",
-            f"Largura da janela em pixels (800 a {largura_tela}):",
+            f"Largura da janela em pixels ({largura_minima} a {largura_tela}):",
             parent=self._raiz,
-            initialvalue=min(largura_atual, largura_tela),
-            minvalue=min(800, largura_tela),
+            initialvalue=max(largura_minima, min(largura_atual, largura_tela)),
+            minvalue=largura_minima,
             maxvalue=largura_tela,
         )
         if largura is None:
@@ -905,17 +1049,16 @@ class JanelaPrincipal:
 
         altura = simpledialog.askinteger(
             "Tamanho personalizado",
-            f"Altura da janela em pixels (560 a {altura_tela}):",
+            f"Altura da janela em pixels ({altura_minima} a {altura_tela}):",
             parent=self._raiz,
-            initialvalue=min(altura_atual, altura_tela),
-            minvalue=min(560, altura_tela),
+            initialvalue=max(altura_minima, min(altura_atual, altura_tela)),
+            minvalue=altura_minima,
             maxvalue=altura_tela,
         )
         if altura is None:
             return
 
-        self._tamanho_personalizado = (largura, altura)
-        self._aplicar_tamanho_janela("Personalizado")
+        self._aplicar_tamanho_janela(largura, altura)
 
     def _construir_video(self, mestre: tk.Misc) -> None:
         """Área ampla para a webcam e o rastreamento das mãos e do rosto."""
@@ -982,7 +1125,7 @@ class JanelaPrincipal:
             font=("Arial", 8, "bold"),
         ).pack(side="left", padx=18)
 
-        # Split Button: tamanho da janela, logo abaixo da câmera.
+        # Split Button: tamanho da imagem da câmera, logo abaixo dela.
         linha_tamanho = tk.Frame(caixa, bg="#111B2D")
         linha_tamanho.pack(
             fill="x",
@@ -992,53 +1135,73 @@ class JanelaPrincipal:
 
         tk.Label(
             linha_tamanho,
-            text="VISUALIZAÇÃO",
+            text="IMAGEM DA CÂMERA",
             bg="#111B2D",
             fg="#7186A8",
             font=("Arial", 8, "bold"),
         ).pack(side="left", padx=(2, 12))
 
-        grupo_split = tk.Frame(
+        self._criar_split_button(
             linha_tamanho,
-            bg="#00BFD9",
-            highlightbackground="#00D7FF",
-            highlightthickness=1,
+            self._texto_tamanho_camera,
+            self._alternar_tamanho_camera,
+            self._abrir_menu_tamanho_camera,
         )
-        grupo_split.pack(side="left")
 
-        self._botao_tamanho_principal = tk.Button(
-            grupo_split,
-            textvariable=self._texto_tamanho_janela,
-            command=self._reaplicar_tamanho_janela,
-            bg="#13243A",
-            fg="#EAF2FF",
-            activebackground="#1B3954",
-            activeforeground="#FFFFFF",
-            font=("Arial", 9, "bold"),
-            relief="flat",
-            bd=0,
-            cursor="hand2",
-            padx=12,
-            pady=7,
-        )
-        self._botao_tamanho_principal.pack(side="left")
+    # ------------------------------------------------ tamanho da imagem da câmera
 
-        self._botao_tamanho_seta = tk.Button(
-            grupo_split,
-            text="▼",
-            command=self._abrir_menu_tamanho,
-            bg="#00BFD9",
-            fg="#07111E",
-            activebackground="#48E5F5",
-            activeforeground="#07111E",
-            font=("Arial", 9, "bold"),
-            relief="flat",
-            bd=0,
-            cursor="hand2",
-            padx=10,
-            pady=7,
+    def _tamanho_camera(self) -> tuple[int, int] | None:
+        """Tamanho fixo escolhido para a imagem, ou None para ajustar à área."""
+        return _ler_resolucao(self._config_visual["video_tamanho"])
+
+    def _descrever_tamanho_camera(self) -> str:
+        tamanho = self._tamanho_camera()
+        if tamanho is None:
+            return "AJUSTAR À ÁREA"
+        return _formatar_resolucao(*tamanho)
+
+    def _abrir_menu_tamanho_camera(self, botao: tk.Widget) -> None:
+        """Abre as resoluções disponíveis para a imagem da câmera."""
+        menu = self._novo_menu()
+        menu.add_command(
+            label="Ajustar à área",
+            command=lambda: self._definir_tamanho_camera(None),
         )
-        self._botao_tamanho_seta.pack(side="left")
+        menu.add_separator()
+
+        largura_area = self._area_video.winfo_width()
+        altura_area = self._area_video.winfo_height()
+
+        for largura, altura in RESOLUCOES_JANELA:
+            # Tamanhos maiores que a área do vídeo não aparecem.
+            if largura > largura_area or altura > altura_area:
+                continue
+            menu.add_command(
+                label=_formatar_resolucao(largura, altura),
+                command=lambda l=largura, a=altura: self._definir_tamanho_camera(
+                    (l, a)
+                ),
+            )
+
+        self._mostrar_menu(menu, botao)
+
+    def _alternar_tamanho_camera(self) -> None:
+        """Clique no botão principal: alterna entre ajustar e o último tamanho."""
+        tamanho = self._tamanho_camera()
+        if tamanho is not None:
+            self._ultimo_tamanho_camera = tamanho
+            self._definir_tamanho_camera(None)
+        else:
+            self._definir_tamanho_camera(self._ultimo_tamanho_camera)
+
+    def _definir_tamanho_camera(self, tamanho: tuple[int, int] | None) -> None:
+        if tamanho is not None:
+            self._ultimo_tamanho_camera = tamanho
+        self._config_visual["video_tamanho"] = (
+            "ajustar" if tamanho is None else f"{tamanho[0]}x{tamanho[1]}"
+        )
+        self._texto_tamanho_camera.set(self._descrever_tamanho_camera())
+        self._salvar_config_suavizacao()
 
     def _construir_painel(self, mestre: tk.Misc) -> None:
         """Painel lateral com sinal reconhecido e controles."""
@@ -1627,11 +1790,12 @@ class JanelaPrincipal:
                 # Espera o layout terminar de ser calculado.
                 return
 
-            self._foto = quadro_para_foto(
-                quadro,
-                largura,
-                altura,
-            )
+            tamanho = self._tamanho_camera()
+            if tamanho is not None and tamanho[0] <= largura and tamanho[1] <= altura:
+                self._foto = quadro_para_foto_exata(quadro, *tamanho)
+            else:
+                # "Ajustar à área", ou o tamanho escolhido não cabe mais.
+                self._foto = quadro_para_foto(quadro, largura, altura)
             self._video.configure(
                 image=self._foto,
                 text="",
