@@ -209,6 +209,10 @@ class JanelaPrincipal:
             _formatar_resolucao(largura_janela, altura_janela)
         )
 
+        # A tela de carregamento usa a mesma raiz e a deixa travada;
+        # aqui a janela volta a poder ser redimensionada e maximizada.
+        raiz.resizable(True, True)
+
         # Permite diminuir a janela até a menor resolução da lista.
         raiz.minsize(
             min(LARGURA_MINIMA_JANELA, largura_tela),
