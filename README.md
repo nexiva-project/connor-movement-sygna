@@ -33,7 +33,7 @@ pip install ruff
 ```bash
 python app.py            # abre a interface (ou: python -m kara_sygna)
 ```
-1. Escreva a palavra, clique em **COMEÇAR A ENSINAR**, faça o sinal e clique em **PARAR**.
+1. Escreva a palavra, clique em **COMEÇAR A ENSINAR**, faça o sinal (com o rosto aparecendo na câmera) durante alguns segundos e clique em **PARAR**. Atalho: escreva quantos segundos gravar no campo **TEMPO DE GRAVAÇÃO**, embaixo da câmera, e aperte **Enter**. A gravação começa depois de uma contagem de 3 s e para sozinha no fim do tempo (campo vazio: grava até apertar Enter de novo). Se o sinal tem movimento, repita o movimento algumas vezes.
 2. Repita **pelo menos 3 vezes por sinal**, mudando posição, distância, inclinação e luz. Cada clique é uma *rodada*, e é isso que permite medir a acurácia de verdade.
 3. Grave também um sinal `neutro` (mão relaxada) para a IA aprender quando *não* há sinal.
 4. **TREINAR IA** (roda em segundo plano) e depois **INICIAR RECONHECIMENTO**.
@@ -50,15 +50,19 @@ kara_sygna/
   camera/captura.py        abre a webcam (backends por sistema operacional)
   visao/                   mãos -> números
     detector_maos.py         MediaPipe + desenho do esqueleto
-    caracteristicas.py       vetor de 126 valores por quadro
+    detector_rosto.py        FaceMesh + desenho do rosto
+    caracteristicas.py       forma das mãos (126 valores)
+    caracteristicas_rosto_maos.py  expressão e distância dedos-rosto (82)
+    quadro.py                vetor completo de cada quadro (214)
     render_3d.py             desenho 3D da pré-visualização
     dedos.py                 contagem de dedos (demonstração)
   dados/                   CSV de exemplos
     repositorio.py           ler/gravar/apagar sinais
     migracao.py              converte arquivos de versões antigas
   ia/                      aprendizado
+    sequencia.py             janelas de quadros: pose + lugar + movimento
     treinamento.py           RandomForest + validação por rodada
-    aumento.py, rotacao.py, geometria.py
+    aumento.py, geometria.py
     reconhecimento.py        previsão e votação (Estabilizador)
     modelo_io.py             salvar/carregar/validar o .pkl
   aplicacao/               regras do programa, sem Tk
@@ -92,6 +96,6 @@ python -m testes.manuais.teste_contar_dedos
 - **"Não foi possível acessar nenhuma câmera"**: a mensagem lista cada tentativa. Confira `ls /dev/video*`, `v4l2-ctl --list-devices` e se `groups` inclui `video` (senão `sudo usermod -aG video $USER` e entre de novo na sessão). Feche Zoom/Teams/navegador, que podem estar usando a câmera.
 - **`No module named 'tkinter'`**: `sudo apt install python3-tk` (e recrie a `.venv` com o Python do sistema).
 - **`mp.solutions` não existe**: versão errada do MediaPipe. Use Python 3.12 e `mediapipe==0.10.21`.
-- **Dados antigos**: `dados_sinais.csv` e `modelo_sinais.pkl` da raiz (ou de `src/`) são copiados para `armazenamento/` na primeira execução, e o CSV ganha a coluna `rodada` (com backup ao lado).
+- **Dados antigos**: `dados_sinais.csv` e `modelo_sinais.pkl` da raiz (ou de `src/`) são copiados para `armazenamento/` na primeira execução. Um CSV de formato antigo (só a forma das mãos, sem rosto nem sequência) é guardado como `dados_sinais_formato_antigo_<data>.csv`, junto com o modelo antigo; grave os sinais de novo.
 - Os números do modelo dependem da proporção da imagem (4:3). A câmera é aberta em 640×480; mude em `config.py` só se for gravar tudo de novo.
 - `INVERTER_LATERALIDADE` em `config.py` define qual mão é "esquerda" nos dados. Se mudar, grave os sinais de novo.

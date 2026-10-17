@@ -13,10 +13,10 @@ from kara_sygna import config
 from kara_sygna.camera import abrir_camera
 from kara_sygna.ia.modelo_io import carregar_modelo
 from kara_sygna.ia.reconhecimento import prever
-from kara_sygna.ia.rotacao import ROTACOES
-from kara_sygna.visao.caracteristicas import montar_vetor_duas_maos
+from kara_sygna.ia.sequencia import BufferQuadros
 from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
 from kara_sygna.visao.detector_rosto import DetectorRosto
+from kara_sygna.visao.quadro import montar_vetor_quadro
 
 QUADROS = 200
 tempos: dict[str, float] = defaultdict(float)
@@ -32,6 +32,7 @@ def medir(nome):
 def main():
     modelo = carregar_modelo(config.ARQUIVO_MODELO)
     quadros = previsoes = 0
+    buffer = BufferQuadros()
     with abrir_camera() as camera, DetectorMaos() as maos, DetectorRosto() as rosto:
         for _ in range(QUADROS):
             with medir("leitura"):
@@ -46,13 +47,15 @@ def main():
                 res_rosto = rosto.detectar(quadro)
             with medir("rosto (desenhar)"):
                 rosto.desenhar(quadro, res_rosto)
-            if tem_maos(res_maos):
-                vetor = montar_vetor_duas_maos(res_maos)
+            with medir("montar vetor do quadro"):
+                altura, largura = quadro.shape[:2]
+                buffer.adicionar(
+                    montar_vetor_quadro(res_maos, res_rosto, largura, altura)
+                )
+            if tem_maos(res_maos) and buffer.cheio:
                 previsoes += 1
-                with medir("prever, 31 rotações"):
-                    prever(modelo, vetor, ROTACOES)
-                with medir("prever, sem rotação"):
-                    prever(modelo, vetor, None)
+                with medir("prever (janela)"):
+                    prever(modelo, buffer.features())
 
     for nome, total in tempos.items():
         n = previsoes if nome.startswith("prever") else quadros

@@ -101,7 +101,7 @@ def _pontos_da_mao(landmarks: Any) -> np.ndarray:
     return np.array([[p.x, p.y, p.z] for p in landmarks.landmark], dtype=np.float64)
 
 
-def _normalizar_mao(pontos: Any) -> np.ndarray | None:
+def normalizar_mao(pontos: Any) -> np.ndarray | None:
     """Centra a mão no pulso e divide pelo tamanho médio da palma.
 
     Args:
@@ -146,7 +146,7 @@ def _rotulo_da_mao(lateralidades: list, indice: int) -> str | None:
     return classificacoes[0].label if classificacoes else None
 
 
-def _separar_maos(resultado: Any) -> dict[str, np.ndarray | None]:
+def separar_maos(resultado: Any) -> dict[str, np.ndarray | None]:
     """Distribui as mãos detectadas nos "slots" esquerda e direita.
 
     Com uma mão, vale a lateralidade informada pelo MediaPipe. Com duas, vale a
@@ -188,12 +188,12 @@ def montar_vetor_duas_maos(resultado: Any) -> np.ndarray:
         Array de 126 ``float64``. Mãos ausentes ou degeneradas viram zeros.
     """
     vetor = np.zeros(TOTAL_FEATURES, dtype=np.float64)
-    slots = _separar_maos(resultado)
+    slots = separar_maos(resultado)
     for lado, intervalo in (("esq", IDX_ESQ), ("dir", IDX_DIR)):
         pontos = slots[lado]
         if pontos is None:
             continue
-        normalizados = _normalizar_mao(pontos)
+        normalizados = normalizar_mao(pontos)
         if normalizados is not None:
             vetor[intervalo] = normalizados.reshape(-1)
     return vetor
@@ -250,28 +250,3 @@ def espelhar_features(vetor: Any) -> np.ndarray:
     saida[..., IDX_ESQ] = _espelhar_varias(direita).reshape(v[..., IDX_ESQ].shape)
     saida[..., IDX_DIR] = _espelhar_varias(esquerda).reshape(v[..., IDX_DIR].shape)
     return saida
-
-
-def linhas_para_gravar(vetor: Any) -> list[np.ndarray]:
-    """Devolve as linhas que devem ser gravadas para um quadro.
-
-    Sinais de uma mão só ganham uma segunda linha, espelhada na mão oposta.
-    Assim o sinal gravado com a mão direita também é reconhecido com a esquerda.
-
-    Args:
-        vetor: Vetor de 126 valores de um quadro.
-
-    Returns:
-        Lista com 1 linha (duas mãos, ou nenhuma) ou 2 linhas (uma mão: a
-        original e a espelhada).
-    """
-    esquerda, direita = dividir_maos(vetor)
-    original = np.concatenate([esquerda, direita])
-    tem_esq, tem_dir = not eh_vetor_zerado(esquerda), not eh_vetor_zerado(direita)
-    zeros = np.zeros(FEATURES_POR_MAO)
-
-    if tem_esq and not tem_dir:
-        return [original, np.concatenate([zeros, espelhar_mao(esquerda)])]
-    if tem_dir and not tem_esq:
-        return [original, np.concatenate([espelhar_mao(direita), zeros])]
-    return [original]

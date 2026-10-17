@@ -15,7 +15,17 @@ from PIL import ImageTk
 
 from kara_sygna import config
 from kara_sygna.aplicacao.controlador import ControladorSinais, Modo
-from kara_sygna.aplicacao.erros import ErroAplicacao, SemDadosError
+from kara_sygna.aplicacao.erros import (
+    ErroAplicacao,
+    PalavraInvalidaError,
+    SemDadosError,
+)
+from kara_sygna.aplicacao.temporizador import (
+    Evento,
+    Fase,
+    TemporizadorEnsino,
+    ler_duracao,
+)
 from kara_sygna.camera import Camera
 from kara_sygna.dados.repositorio import DadosInvalidosError
 from kara_sygna.ia.modelo_io import ModeloInvalidoError
@@ -30,9 +40,9 @@ from kara_sygna.interface.janela_log import JanelaLog
 from kara_sygna.interface.janela_previsualizacao import JanelaPrevisualizacao
 from kara_sygna.interface.janela_sinais import JanelaSinais
 from kara_sygna.interface.tarefas import ExecutorTk
-from kara_sygna.visao.caracteristicas import montar_vetor_duas_maos
 from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
 from kara_sygna.visao.detector_rosto import DetectorRosto, ResultadoRosto
+from kara_sygna.visao.quadro import montar_vetor_quadro
 from kara_sygna.visao.suavizacao import SuavizadorPontos
 
 logger = logging.getLogger(__name__)
@@ -222,8 +232,15 @@ class JanelaPrincipal:
 
         raiz.protocol("WM_DELETE_WINDOW", self.fechar)
         raiz.bind("<Configure>", self._ao_redimensionar_janela, add="+")
+        # Enter começa a ensinar ou, se já está ensinando, para.
+        raiz.bind("<Return>", self._alternar_ensino, add="+")
+        raiz.bind("<KP_Enter>", self._alternar_ensino, add="+")
 
         self._palavra = tk.StringVar(master=raiz)
+        # Segundos de gravação (campo abaixo da câmera); vazio = até parar.
+        self._duracao = tk.StringVar(master=raiz)
+        self._temporizador = TemporizadorEnsino()
+        self._palavra_agendada = ""
         self._sinal_atual = tk.StringVar(
             master=raiz,
             value="AGUARDANDO SINAL",
@@ -1165,6 +1182,44 @@ class JanelaPrincipal:
             font=("Arial", 8, "bold"),
         ).pack(side="left", padx=18)
 
+        # Tempo de gravação do ensino, logo abaixo da câmera.
+        linha_tempo = tk.Frame(caixa, bg="#111B2D")
+        linha_tempo.pack(fill="x", padx=12, pady=(0, 10))
+
+        tk.Label(
+            linha_tempo,
+            text="TEMPO DE GRAVAÇÃO (SEGUNDOS)",
+            bg="#111B2D",
+            fg="#7186A8",
+            font=("Arial", 8, "bold"),
+        ).pack(side="left", padx=(2, 12))
+
+        tk.Entry(
+            linha_tempo,
+            textvariable=self._duracao,
+            width=6,
+            justify="center",
+            font=("Arial", 11),
+            bg="#080D18",
+            fg="#F1F7FF",
+            insertbackground="#00D7FF",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#30415C",
+            highlightcolor="#00D7FF",
+        ).pack(side="left", ipady=4)
+
+        tk.Label(
+            linha_tempo,
+            text=(
+                f"Enter: espera {config.SEGUNDOS_CONTAGEM_ENSINO} s e grava esse "
+                "tempo. Vazio: grava até parar."
+            ),
+            bg="#111B2D",
+            fg="#7186A8",
+            font=("Arial", 8),
+        ).pack(side="left", padx=(12, 0))
+
         # Split Button: tamanho da imagem da câmera, logo abaixo dela.
         linha_tamanho = tk.Frame(caixa, bg="#111B2D")
         linha_tamanho.pack(
@@ -1331,11 +1386,10 @@ class JanelaPrincipal:
             highlightcolor="#00D7FF",
         )
         campo.pack(fill="x", padx=12, pady=(5, 10), ipady=7)
-        campo.bind("<Return>", lambda _e: self._iniciar_ensino())
 
         self._botao_estilizado(
             ensinar,
-            "COMEÇAR A ENSINAR",
+            "COMEÇAR A ENSINAR (ENTER)",
             self._iniciar_ensino,
             principal=True,
         ).pack(fill="x", padx=12, pady=(0, 7))
@@ -1533,12 +1587,44 @@ class JanelaPrincipal:
         return self._executor.ocupado
 
     def _iniciar_ensino(self) -> None:
+        """Começa a contagem; a gravação começa quando ela acabar."""
         if self._bloqueado_por_treino():
             return
+        palavra = self._palavra.get().strip()
         try:
-            self._status.set(self._controlador.iniciar_ensino(self._palavra.get()))
+            if not palavra:
+                raise PalavraInvalidaError(
+                    "Escreva a palavra do sinal antes de começar."
+                )
+            duracao = ler_duracao(self._duracao.get())
         except ErroAplicacao as erro:
             self._tratar_erro(erro, "Não foi possível ensinar")
+            return
+
+        self._parar()  # para o reconhecimento ou um ensino em andamento
+        self._palavra_agendada = palavra
+        self._temporizador.iniciar(duracao)
+        tempo = "até parar" if duracao is None else f"por {duracao:g} s"
+        self._status.set(
+            f"Prepare “{palavra}”: a gravação começa em "
+            f"{config.SEGUNDOS_CONTAGEM_ENSINO} s e vai {tempo}."
+        )
+
+    def _comecar_gravacao(self) -> None:
+        """Fim da contagem: começa a gravar de verdade."""
+        try:
+            self._status.set(self._controlador.iniciar_ensino(self._palavra_agendada))
+        except ErroAplicacao as erro:
+            self._temporizador.cancelar()
+            self._tratar_erro(erro, "Não foi possível ensinar")
+
+    def _alternar_ensino(self, _evento: tk.Event | None = None) -> str:
+        """Tecla Enter: começa a ensinar ou, na contagem ou gravação, para."""
+        if self._temporizador.ativo or self._controlador.modo is Modo.ENSINANDO:
+            self._parar()
+        else:
+            self._iniciar_ensino()
+        return "break"
 
     def _iniciar_reconhecimento(self) -> None:
         if self._bloqueado_por_treino():
@@ -1549,6 +1635,7 @@ class JanelaPrincipal:
             self._tratar_erro(erro, "Não foi possível reconhecer")
 
     def _parar(self) -> None:
+        self._temporizador.cancelar()
         estava_ensinando = self._controlador.modo is Modo.ENSINANDO
         self._status.set(self._controlador.parar())
         if estava_ensinando:
@@ -1755,10 +1842,16 @@ class JanelaPrincipal:
         else:
             self._suavizador_maos.limpar()
 
+        # Contagem antes do ensino e parada automática no fim do tempo.
+        evento = self._temporizador.atualizar()
+        if evento is Evento.COMECAR:
+            self._comecar_gravacao()
+        elif evento is Evento.PARAR:
+            self._parar()
+
         # A IA continua recebendo o resultado original, não o visual suavizado.
-        vetor = (
-            montar_vetor_duas_maos(resultado_maos) if tem_maos(resultado_maos) else None
-        )
+        altura, largura = quadro_original.shape[:2]
+        vetor = montar_vetor_quadro(resultado_maos, resultado_rosto, largura, altura)
 
         try:
             resposta = self._controlador.processar_quadro(vetor)
@@ -1774,15 +1867,25 @@ class JanelaPrincipal:
             if resposta.sinal_confirmado:
                 self._adicionar_texto(resposta.sinal_confirmado)
 
-            if resposta.texto_video:
+            texto_video = self._texto_do_temporizador(resposta.texto_video)
+            if texto_video:
                 self._escrever_no_video(
                     quadro,
-                    resposta.texto_video,
+                    texto_video,
                     tema.COR_VIDEO_BGR[resposta.nivel],
                     self._config_visual.get("video_cor_texto", "#FFFFFF"),
                 )
 
         self._mostrar(quadro)
+
+    def _texto_do_temporizador(self, texto_video: str) -> str:
+        """Junta a contagem ou o tempo que falta ao texto sobre a câmera."""
+        restantes = self._temporizador.segundos_restantes()
+        if self._temporizador.fase is Fase.CONTAGEM:
+            return f"PREPARE: {self._palavra_agendada}  {restantes}"
+        if restantes is not None and texto_video:
+            return f"{texto_video}  FALTAM {restantes} s"
+        return texto_video
 
     @staticmethod
     def _escrever_no_video(

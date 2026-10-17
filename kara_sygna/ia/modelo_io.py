@@ -9,7 +9,7 @@ from typing import Any
 
 import joblib
 
-from kara_sygna.visao.caracteristicas import TOTAL_FEATURES, nomes_features
+from kara_sygna.ia.sequencia import TOTAL_FEATURES_JANELA, nomes_features_janela
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,8 @@ def salvar_modelo(modelo: Any, caminho: Path) -> None:
     caminho = Path(caminho)
     caminho.parent.mkdir(parents=True, exist_ok=True)
     temporario = caminho.with_suffix(caminho.suffix + ".tmp")
-    joblib.dump(modelo, temporario)
+    # Comprimido: o RandomForest cru ocupa dezenas de MB; assim fica ~3x menor.
+    joblib.dump(modelo, temporario, compress=3)
     os.replace(temporario, caminho)
     logger.info("Modelo salvo em %s", caminho)
 
@@ -47,14 +48,14 @@ def validar_modelo(modelo: Any) -> None:
         raise ModeloInvalidoError("O modelo carregado não oferece predict_proba().")
 
     esperado = getattr(modelo, "n_features_in_", None)
-    if esperado is not None and esperado != TOTAL_FEATURES:
+    if esperado is not None and esperado != TOTAL_FEATURES_JANELA:
         raise ModeloInvalidoError(
-            f"O modelo espera {esperado} características, mas o programa gera {TOTAL_FEATURES}. "
+            f"O modelo espera {esperado} características, mas o programa gera {TOTAL_FEATURES_JANELA}. "
             "Treine a IA de novo com o CSV atual."
         )
 
     nomes = getattr(modelo, "feature_names_in_", None)
-    if nomes is not None and list(nomes) != nomes_features():
+    if nomes is not None and list(nomes) != nomes_features_janela():
         raise ModeloInvalidoError(
             "O modelo foi treinado com outras colunas. Treine a IA de novo."
         )

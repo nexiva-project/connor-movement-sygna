@@ -48,14 +48,6 @@ INVERTER_LATERALIDADE = True
 CORES_MAOS_BGR = {"esq": (70, 190, 255), "dir": (150, 105, 255)}
 
 # ---------------------------------------------------------------------------
-# Rosto (FaceMesh)
-# ---------------------------------------------------------------------------
-# True: o face mesh só roda a cada quadro quando uma mão chega perto do rosto;
-# longe dele, só "espia" de tempos em tempos (economiza processamento).
-# False: roda em todos os quadros, como antes.
-ROSTO_SOB_DEMANDA = True
-
-# ---------------------------------------------------------------------------
 # Reconhecimento
 # ---------------------------------------------------------------------------
 CONFIANCA_MINIMA = 0.70  # probabilidade mínima do melhor sinal
@@ -65,8 +57,31 @@ VOTOS_MINIMOS = 6  # votos necessários para confirmar um sinal
 QUADROS_PARA_LIBERAR = 8  # quadros sem o sinal para poder repeti-lo
 # Rótulos aprendidos pela IA que NÃO viram texto (ex.: mão relaxada).
 ROTULOS_IGNORADOS = frozenset({"neutro", "nada"})
-# Testa várias inclinações da mão a cada quadro e fica com a mais confiante.
-CORRECAO_ROTACAO_ATIVA = True
+
+# ---------------------------------------------------------------------------
+# Quais quadros da câmera são usados (ensino E reconhecimento)
+# ---------------------------------------------------------------------------
+# "mudanca": só usa um quadro quando a mão muda (forma ou lugar) ou quando uma
+#            mão aparece/some. Mão parada não enche o CSV. (Filtro original.)
+# "fixo":    usa 1 a cada USAR_1_A_CADA_QUADROS quadros, mude ou não.
+# Se trocar o modo, grave os sinais de novo e treine a IA.
+MODO_QUADROS = "mudanca"
+
+# Modo "mudanca":
+# Mudança mínima na forma das mãos (média da diferença dos 126 valores).
+LIMIAR_MUDANCA_FORMA = 0.015
+# Mudança mínima no lugar das mãos, em larguras de rosto (0.05 = 5% do rosto).
+LIMIAR_MUDANCA_POSICAO = 0.05
+# Com a mão parada, ainda usa 1 quadro a cada tantos segundos, para a IA
+# aprender o sinal parado. 0 = nunca (exatamente como o filtro original).
+PARADO_USAR_A_CADA_S = 0.5
+
+# Modo "fixo":
+USAR_1_A_CADA_QUADROS = 2
+
+# Quantos quadros usados a IA olha para reconhecer um sinal (inclusive o
+# movimento).
+QUADROS_POR_JANELA = 10
 
 # ---------------------------------------------------------------------------
 # Treinamento
@@ -78,9 +93,13 @@ MAX_DOBRAS_VALIDACAO = 5
 MIN_VARIANTES_AUMENTO = 2
 MAX_VARIANTES_AUMENTO = 8
 ORCAMENTO_LINHAS_AUMENTO = 40_000
-# Quando o CSV não tem a coluna "rodada", cada sinal é dividido em, no
-# mínimo, este número de blocos contíguos para permitir a validação.
-RODADAS_MINIMAS_INFERIDAS = 5
+# No treino, cada gravação é cortada em janelas que começam de N em N quadros.
+PASSO_JANELA_TREINO = 2
+# Durante o ensino, os quadros são gravados no disco em lotes deste tamanho.
+QUADROS_POR_LOTE_GRAVACAO = 30
+# Ao começar a ensinar, espera estes segundos antes de gravar (tempo para se
+# posicionar e já começar o sinal).
+SEGUNDOS_CONTAGEM_ENSINO = 3
 
 # ---------------------------------------------------------------------------
 # Interface

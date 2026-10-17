@@ -16,8 +16,9 @@ from kara_sygna.aplicacao.erros import ErroAplicacao
 from kara_sygna.aplicacao.inicializacao import preparar_ambiente
 from kara_sygna.camera import CameraIndisponivelError, abrir_camera
 from kara_sygna.ia.modelo_io import ModeloInvalidoError
-from kara_sygna.visao.caracteristicas import montar_vetor_duas_maos
-from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
+from kara_sygna.visao.detector_maos import DetectorMaos
+from kara_sygna.visao.detector_rosto import DetectorRosto
+from kara_sygna.visao.quadro import montar_vetor_quadro
 
 JANELA = "kara-sygna - Reconhecimento"
 COR_NIVEL = {
@@ -46,17 +47,17 @@ def main() -> int:
     frase: list[str] = []
     print("Câmera aberta! Faça um sinal. 'q' sai, 'c' limpa o texto.")
     try:
-        with DetectorMaos() as detector:
+        with DetectorMaos() as detector, DetectorRosto() as detector_rosto:
             while True:
                 quadro = camera.ler()
                 if quadro is None:
                     break
                 quadro = cv2.flip(quadro, 1)
                 resultado = detector.detectar(quadro)
+                rosto = detector_rosto.detectar(quadro)
+                altura, largura = quadro.shape[:2]
+                vetor = montar_vetor_quadro(resultado, rosto, largura, altura)
                 detector.desenhar(quadro, resultado)
-                vetor = (
-                    montar_vetor_duas_maos(resultado) if tem_maos(resultado) else None
-                )
                 resposta = controlador.processar_quadro(vetor)
                 if resposta.sinal_confirmado:
                     frase.append(resposta.sinal_confirmado)

@@ -18,6 +18,7 @@ A proximidade não comprova contato físico.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -195,13 +196,13 @@ def nomes_features_rosto_maos() -> list[str]:
     """Devolve os nomes das 82 características, na ordem do vetor."""
     nomes = [
         "rosto_presente",
-        "mao_esquerda_imagem_presente",
-        "mao_direita_imagem_presente",
+        "mao_esq_presente",
+        "mao_dir_presente",
     ]
 
     nomes.extend(INDICES_EXPRESSAO)
 
-    for lado in ("esquerda_imagem", "direita_imagem"):
+    for lado in ("esq", "dir"):
         for dedo in PONTAS_DEDOS:
             for regiao in NOMES_REGIOES:
                 nomes.append(f"{lado}_dedo_{dedo}_dist_{regiao}")
@@ -285,8 +286,13 @@ def _extrair_expressao(
     return valores
 
 
-def _obter_maos(resultado_maos: Any) -> list[Any]:
-    """Obtém até duas mãos e ordena pela posição horizontal na imagem."""
+def _obter_maos(resultado_maos: Any) -> list[np.ndarray | None]:
+    """Obtém até duas mãos, ordenadas pela posição horizontal na imagem.
+
+    Returns:
+        Lista com 2 posições; cada uma é uma matriz (21, 3) de coordenadas
+        normalizadas do MediaPipe, ou ``None`` se não houver mão.
+    """
     listas = getattr(resultado_maos, "multi_hand_landmarks", None) or []
 
     maos_validas = []
@@ -295,12 +301,15 @@ def _obter_maos(resultado_maos: Any) -> list[Any]:
         if len(getattr(landmarks, "landmark", [])) < 21:
             continue
 
-        centro_x = float(np.mean([p.x for p in landmarks.landmark[:21]]))
-        maos_validas.append((centro_x, landmarks))
+        pontos = np.array(
+            [[p.x, p.y, p.z] for p in landmarks.landmark[:21]], dtype=np.float64
+        )
+        maos_validas.append((float(pontos[:, 0].mean()), pontos))
 
     maos_validas.sort(key=lambda item: item[0])
 
-    return [item[1] for item in maos_validas[:2]]
+    maos: list[np.ndarray | None] = [item[1] for item in maos_validas[:2]]
+    return maos + [None] * (2 - len(maos))
 
 
 def extrair_features_rosto_maos(
@@ -311,6 +320,10 @@ def extrair_features_rosto_maos(
 ) -> np.ndarray:
     """Extrai 82 características faciais e de proximidade mão-rosto.
 
+    Aqui as mãos são identificadas pela posição horizontal na imagem
+    (esquerda da imagem primeiro). Para usar os mesmos lados do vetor das
+    mãos, use :func:`extrair_features_rosto_maos_slots`.
+
     Args:
         resultado_rosto: ResultadoRosto produzido por DetectorRosto.detectar().
         resultado_maos: Resultado bruto produzido por DetectorMaos.detectar().
@@ -319,29 +332,47 @@ def extrair_features_rosto_maos(
 
     Returns:
         Vetor float32 com exatamente 82 valores.
+    """
+    return extrair_features_rosto_maos_slots(
+        resultado_rosto, _obter_maos(resultado_maos), largura, altura
+    )
 
-    Nota:
-        As mãos são identificadas pela posição horizontal na imagem:
-        esquerda da imagem e direita da imagem. Isso não equivale
-        necessariamente à mão anatômica esquerda ou direita.
+
+def extrair_features_rosto_maos_slots(
+    resultado_rosto: Any,
+    maos: Sequence[np.ndarray | None],
+    largura: int,
+    altura: int,
+) -> np.ndarray:
+    """Extrai 82 características faciais e de proximidade mão-rosto.
+
+    Args:
+        resultado_rosto: ResultadoRosto produzido por DetectorRosto.detectar().
+        maos: Duas posições ``(esq, dir)``; cada uma é uma matriz (21, 3) de
+            coordenadas normalizadas do MediaPipe, ou ``None``.
+        largura: Largura do quadro usado pelos dois detectores.
+        altura: Altura do quadro usado pelos dois detectores.
+
+    Returns:
+        Vetor float32 com exatamente 82 valores.
     """
     if largura <= 0 or altura <= 0:
         raise ValueError("Largura e altura precisam ser positivas.")
+    if len(maos) != 2:
+        raise ValueError("Informe exatamente duas posições de mão (esq, dir).")
 
     vetor = np.zeros(TOTAL_FEATURES_ROSTO_MAOS, dtype=np.float32)
 
     rosto_presente = bool(getattr(resultado_rosto, "presente", False))
     rosto = getattr(resultado_rosto, "landmarks", None)
 
-    maos = _obter_maos(resultado_maos)
-
     vetor[0] = float(
         rosto_presente
         and rosto is not None
         and len(getattr(rosto, "landmark", [])) == 468
     )
-    vetor[1] = float(len(maos) >= 1)
-    vetor[2] = float(len(maos) >= 2)
+    vetor[1] = float(maos[0] is not None)
+    vetor[2] = float(maos[1] is not None)
 
     # Inicializa todas as distâncias como indisponíveis.
     inicio_distancias = 3 + len(INDICES_EXPRESSAO)
@@ -382,16 +413,16 @@ def extrair_features_rosto_maos(
         cursor = inicio_distancias
 
         for indice_mao in range(2):
-            if indice_mao >= len(maos):
+            mao = maos[indice_mao]
+
+            if mao is None:
                 cursor += len(PONTAS_DEDOS) * len(NOMES_REGIOES)
                 continue
 
-            mao = maos[indice_mao]
-
             for indice_dedo in PONTAS_DEDOS:
-                dedo = mao.landmark[indice_dedo]
+                dedo = mao[indice_dedo]
                 ponto_dedo = np.array(
-                    [dedo.x * largura, dedo.y * altura],
+                    [dedo[0] * largura, dedo[1] * altura],
                     dtype=np.float64,
                 )
 
@@ -434,5 +465,6 @@ __all__ = [
     "REGIOES",
     "TOTAL_FEATURES_ROSTO_MAOS",
     "extrair_features_rosto_maos",
+    "extrair_features_rosto_maos_slots",
     "nomes_features_rosto_maos",
 ]

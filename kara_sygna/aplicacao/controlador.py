@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,7 @@ from kara_sygna.aplicacao.erros import (
     SemDadosError,
 )
 from kara_sygna.aplicacao.filtro_quadros import FiltroQuadros
-from kara_sygna.aplicacao.previsualizacao import Reproducao, combinar_espelhos
+from kara_sygna.aplicacao.previsualizacao import Reproducao, completar_com_espelho
 from kara_sygna.dados.repositorio import (
     RepositorioSinais,
     novo_id_rodada,
@@ -32,7 +32,8 @@ from kara_sygna.ia.modelo_io import (
     modelo_esta_atualizado,
 )
 from kara_sygna.ia.reconhecimento import Estabilizador, prever
-from kara_sygna.ia.rotacao import ROTACOES
+from kara_sygna.ia.sequencia import BufferQuadros
+from kara_sygna.visao.quadro import tem_mao
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +87,17 @@ class ControladorSinais:
         self.caminho_modelo = Path(caminho_modelo)
         self._carregador_modelo = carregador_modelo
         self.estabilizador = Estabilizador()
-        self.filtro_quadros = FiltroQuadros(limiar=0.015)
+        self.buffer = BufferQuadros()
         self.modo = Modo.PARADO
         self.rotulo_atual = ""
         self.total_gravado = 0
         self._rodada = 0
+        self._pendentes: list[tuple[int, np.ndarray]] = []
+        # Quadros sem mão depois da última mão; só são gravados se a mão voltar.
+        self._lacuna: list[np.ndarray] = []
+        self.filtro_quadros = FiltroQuadros()
+        self._ultima_resposta = ResultadoQuadro()
+        self._ultimo_voto: str | None = None
         self._modelo: Any = None
 
     # -- ensino ----------------------------------------------------------------
@@ -106,7 +113,9 @@ class ControladorSinais:
         self.rotulo_atual = palavra
         self.total_gravado = 0
         self._rodada = novo_id_rodada()
-        self.filtro_quadros.reiniciar()
+        self._pendentes = []
+        self._lacuna = []
+        self.filtro_quadros = FiltroQuadros()  # lê o modo atual do config
         self.modo = Modo.ENSINANDO
 
         logger.info("Ensino iniciado: %s", palavra)
@@ -117,6 +126,8 @@ class ControladorSinais:
         anterior, self.modo = self.modo, Modo.PARADO
 
         if anterior is Modo.ENSINANDO:
+            self._lacuna = []  # o fim sem mão não é gravado
+            self._gravar_pendentes()
             logger.info(
                 "Ensino parado: %d linhas gravadas.",
                 self.total_gravado,
@@ -171,6 +182,10 @@ class ControladorSinais:
 
         self._modelo = self._carregador_modelo(self.caminho_modelo)
         self.estabilizador.reiniciar()
+        self.buffer.limpar()
+        self.filtro_quadros = FiltroQuadros()  # lê o modo atual do config
+        self._ultima_resposta = ResultadoQuadro("PREPARANDO...")
+        self._ultimo_voto = None
         self.modo = Modo.RECONHECENDO
 
         logger.info(
@@ -189,7 +204,13 @@ class ControladorSinais:
         self,
         vetor: np.ndarray | None,
     ) -> ResultadoQuadro:
-        """Processa um quadro de acordo com o modo atual."""
+        """Processa um quadro de acordo com o modo atual.
+
+        Args:
+            vetor: Vetor de 214 valores do quadro
+                (:func:`kara_sygna.visao.quadro.montar_vetor_quadro`), mesmo
+                sem mãos. ``None`` só se o quadro não pôde ser analisado.
+        """
         if self.modo is Modo.ENSINANDO:
             return self._quadro_de_ensino(vetor)
 
@@ -202,71 +223,91 @@ class ControladorSinais:
         self,
         vetor: np.ndarray | None,
     ) -> ResultadoQuadro:
-        """Grava apenas quadros válidos suficientemente diferentes."""
+        """Grava os quadros em sequência: a IA aprende o movimento.
+
+        Para o CSV não crescer à toa, só são gravados os quadros escolhidos
+        pelo :class:`FiltroQuadros` (``config.MODO_QUADROS``), e os quadros sem
+        mão do começo e do fim da gravação ficam de fora.
+        """
         if vetor is None:
             return ResultadoQuadro()
 
-        if not self.filtro_quadros.aceitar(vetor):
-            return ResultadoQuadro(
-                texto_video=f"ENSINANDO: {self.rotulo_atual} ({self.total_gravado})",
-                nivel=Nivel.ENSINO,
-                status=(
-                    f"Ensinando “{self.rotulo_atual}”: "
-                    f"{self.total_gravado} exemplos. "
-                    "Aguardando uma pose diferente."
-                ),
-            )
+        if self.filtro_quadros.aceitar(vetor):
+            vetor = np.asarray(vetor, dtype=np.float64)
+            if not tem_mao(vetor):
+                if self.total_gravado:  # antes da primeira mão, nada é guardado
+                    self._lacuna.append(vetor)
+            else:
+                for quadro in [*self._lacuna, vetor]:
+                    self._pendentes.append((self.total_gravado, quadro))
+                    self.total_gravado += 1
+                self._lacuna = []
+                if len(self._pendentes) >= config.QUADROS_POR_LOTE_GRAVACAO:
+                    self._gravar_pendentes()
 
-        self.total_gravado += self.repositorio.anexar_quadro(
-            self.rotulo_atual,
-            self._rodada,
-            vetor,
-        )
-
+        dica = "" if tem_mao(vetor) else " Mostre as mãos para a câmera."
         return ResultadoQuadro(
             texto_video=f"ENSINANDO: {self.rotulo_atual} ({self.total_gravado})",
             nivel=Nivel.ENSINO,
-            status=(f"Ensinando “{self.rotulo_atual}”: {self.total_gravado} exemplos."),
+            status=(
+                f"Ensinando “{self.rotulo_atual}”: {self.total_gravado} quadros.{dica}"
+            ),
         )
+
+    def _gravar_pendentes(self) -> None:
+        """Grava no CSV os quadros do ensino que ainda estão na memória."""
+        pendentes, self._pendentes = self._pendentes, []
+        self.repositorio.anexar_quadros(self.rotulo_atual, self._rodada, pendentes)
 
     def _quadro_de_reconhecimento(
         self,
         vetor: np.ndarray | None,
     ) -> ResultadoQuadro:
-        """Prevê o sinal e atualiza a votação."""
+        """Junta o quadro aos anteriores, prevê o sinal e atualiza a votação.
+
+        Só os quadros escolhidos pelo :class:`FiltroQuadros` (o mesmo modo do
+        ensino) entram na janela e geram uma nova previsão. Nos outros, a
+        última previsão continua valendo: cada quadro da câmera conta um voto,
+        então um sinal parado é confirmado tão rápido quanto um em movimento.
+        """
         if vetor is None:
             self.estabilizador.atualizar(None)
             return ResultadoQuadro("MOSTRE UM SINAL")
 
-        rotacoes = ROTACOES if config.CORRECAO_ROTACAO_ATIVA else None
-        predicao = prever(self._modelo, vetor, rotacoes)
+        if self.filtro_quadros.aceitar(vetor):
+            self._ultima_resposta, self._ultimo_voto = self._analisar_janela(vetor)
 
-        confirmado = self.estabilizador.atualizar(
-            predicao.sinal if predicao.aceito else None
-        )
-
+        confirmado = self.estabilizador.atualizar(self._ultimo_voto)
         if confirmado in config.ROTULOS_IGNORADOS:
             confirmado = None
+        return replace(self._ultima_resposta, sinal_confirmado=confirmado)
+
+    def _analisar_janela(self, vetor: np.ndarray) -> tuple[ResultadoQuadro, str | None]:
+        """Acrescenta o quadro à janela e prevê o sinal.
+
+        Returns:
+            O que mostrar na tela e o voto deste quadro (o sinal aceito, ou
+            ``None`` se não há mão, a janela não encheu ou a IA ficou incerta).
+        """
+        self.buffer.adicionar(vetor)
+        if not tem_mao(vetor):
+            return ResultadoQuadro("MOSTRE UM SINAL"), None
+
+        if not self.buffer.cheio:
+            return ResultadoQuadro("PREPARANDO..."), None
+
+        predicao = prever(self._modelo, self.buffer.features())
 
         if not predicao.aceito:
             return ResultadoQuadro(
-                f"INCERTO ({predicao.confianca:.0%})",
-                Nivel.INCERTO,
-                sinal_confirmado=confirmado,
-            )
-
-        texto = f"SINAL: {predicao.sinal} ({predicao.confianca:.0%})"
-
-        if any(predicao.rotacao):
-            rx, ry, rz = predicao.rotacao
-            texto += f" [ajuste {rx:+d},{ry:+d},{rz:+d} graus]"
+                f"INCERTO ({predicao.confianca:.0%})", Nivel.INCERTO
+            ), None
 
         return ResultadoQuadro(
-            texto,
+            f"SINAL: {predicao.sinal} ({predicao.confianca:.0%})",
             Nivel.OK,
             f"Sinal reconhecido: {predicao.sinal} ({predicao.confianca:.0%})",
-            confirmado,
-        )
+        ), predicao.sinal
 
     # -- lista de sinais -------------------------------------------------------
 
@@ -290,11 +331,12 @@ class ControladorSinais:
 
     def apagar_sinal(self, palavra: str) -> str:
         """Apaga um sinal e remove o modelo treinado."""
+        if self.modo is Modo.ENSINANDO:
+            self.parar()
         self.repositorio.apagar_sinal(palavra)
         remover_arquivo_se_existir(self.caminho_modelo)
         self._modelo = None
         self.modo = Modo.PARADO
-        self.filtro_quadros.reiniciar()
 
         return f"Sinal “{palavra}” apagado. Treine a IA novamente."
 
@@ -305,4 +347,4 @@ class ControladorSinais:
         if len(exemplos) == 0:
             raise SemDadosError(f"Não há exemplos gravados para “{palavra}”.")
 
-        return Reproducao(palavra, combinar_espelhos(exemplos))
+        return Reproducao(palavra, completar_com_espelho(exemplos))

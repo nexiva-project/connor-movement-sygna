@@ -1,9 +1,14 @@
 """Armazenamento dos exemplos de sinais em um arquivo CSV.
 
-Formato: uma linha por quadro, com as colunas ``rotulo``, ``rodada`` e as 126
-características. ``rodada`` identifica a sessão de gravação (um clique em
-"COMEÇAR A ENSINAR"); a validação do modelo usa isso para nunca misturar
-quadros da mesma sessão no treino e no teste.
+Formato: uma linha por quadro da câmera, com as colunas ``rotulo``, ``rodada``,
+``quadro`` e as 214 características de :mod:`kara_sygna.visao.quadro`.
+
+* ``rodada`` identifica a sessão de gravação (um clique em "COMEÇAR A
+  ENSINAR"); a validação do modelo usa isso para nunca misturar quadros da
+  mesma sessão no treino e no teste.
+* ``quadro`` é a posição do quadro dentro da rodada. Os quadros são gravados
+  em sequência, porque a IA aprende o movimento; quais quadros da câmera
+  entram é decidido por :class:`kara_sygna.aplicacao.filtro_quadros.FiltroQuadros`.
 """
 
 from __future__ import annotations
@@ -20,16 +25,21 @@ import numpy as np
 import pandas as pd
 
 from kara_sygna import config
-from kara_sygna.visao.caracteristicas import (
-    TOTAL_FEATURES,
-    linhas_para_gravar,
-    nomes_features,
+from kara_sygna.visao.quadro import (
+    IDX_MAOS,
+    TOTAL_FEATURES_QUADRO,
+    maos_presentes,
+    nomes_features_quadro,
 )
 
 logger = logging.getLogger(__name__)
 
 COLUNA_ROTULO = "rotulo"
 COLUNA_RODADA = "rodada"
+COLUNA_QUADRO = "quadro"
+# 4 casas bastam (as medidas são relativas, da ordem de 0,01 a 10) e deixam
+# o CSV menor.
+CASAS_DECIMAIS = 4
 
 
 class DadosInvalidosError(ValueError):
@@ -41,7 +51,9 @@ class ConjuntoDados:
     """Todos os exemplos do CSV, já separados para o treinamento.
 
     Attributes:
-        X: Matriz (n, 126) de características.
+        X: Matriz (n, colunas) de características: 214 por quadro, ao ler o
+            CSV, ou as colunas de uma janela, depois de
+            :func:`kara_sygna.ia.sequencia.montar_amostras`.
         y: Vetor (n,) com o rótulo (palavra) de cada linha.
         grupos: Vetor (n,) com a rodada de cada linha.
     """
@@ -61,13 +73,21 @@ class ConjuntoDados:
 
 
 def cabecalho() -> list[str]:
-    """Cabeçalho completo do CSV: rotulo, rodada e as 126 características."""
-    return [COLUNA_ROTULO, COLUNA_RODADA] + nomes_features()
+    """Cabeçalho completo do CSV: rotulo, rodada, quadro e as 214 características."""
+    return [COLUNA_ROTULO, COLUNA_RODADA, COLUNA_QUADRO] + nomes_features_quadro()
+
+
+_ultimo_id_rodada = 0
 
 
 def novo_id_rodada() -> int:
-    """Gera o identificador de uma nova rodada de gravação (segundos desde 1970)."""
-    return int(time.time())
+    """Gera o identificador de uma nova rodada (milissegundos desde 1970).
+
+    Nunca repete um id já entregue, mesmo com dois cliques no mesmo instante.
+    """
+    global _ultimo_id_rodada
+    _ultimo_id_rodada = max(time.time_ns() // 1_000_000, _ultimo_id_rodada + 1)
+    return _ultimo_id_rodada
 
 
 class RepositorioSinais:
@@ -102,33 +122,42 @@ class RepositorioSinais:
 
     # -- escrita ------------------------------------------------------------
 
-    def anexar_quadro(self, rotulo: str, rodada: int, vetor: Iterable[float]) -> int:
-        """Grava um quadro (e o seu espelho, se for sinal de uma mão só).
+    def anexar_quadros(
+        self,
+        rotulo: str,
+        rodada: int,
+        quadros: Iterable[tuple[int, Iterable[float]]],
+    ) -> int:
+        """Grava quadros de uma rodada.
 
         Args:
             rotulo: Palavra do sinal.
             rodada: Identificador da rodada (:func:`novo_id_rodada`).
-            vetor: As 126 características do quadro.
+            quadros: Pares ``(numero_do_quadro, vetor de 214 valores)``.
 
         Returns:
-            Quantas linhas foram gravadas (1 ou 2).
+            Quantas linhas foram gravadas.
 
         Raises:
-            ValueError: Se o vetor não tiver 126 valores.
+            ValueError: Se algum vetor não tiver 214 valores (nada é gravado).
         """
-        vetor = np.asarray(list(vetor), dtype=np.float64)
-        if vetor.size != TOTAL_FEATURES:
-            raise ValueError(
-                f"O vetor tem {vetor.size} valores; esperava {TOTAL_FEATURES}."
-            )
-
-        linhas = linhas_para_gravar(vetor)
-        with open(self.caminho, "a", newline="", encoding="utf-8") as arquivo:
-            escritor = csv.writer(arquivo)
-            for linha in linhas:
-                escritor.writerow(
-                    [rotulo, rodada] + [round(float(x), 6) for x in linha]
+        linhas = []
+        for numero, vetor in quadros:
+            vetor = np.asarray(list(vetor), dtype=np.float64)
+            if vetor.size != TOTAL_FEATURES_QUADRO:
+                raise ValueError(
+                    f"O vetor tem {vetor.size} valores; esperava {TOTAL_FEATURES_QUADRO}."
                 )
+            linhas.append(
+                [rotulo, rodada, int(numero)]
+                + [round(float(x), CASAS_DECIMAIS) for x in vetor]
+            )
+        if not linhas:
+            return 0
+
+        self.garantir_arquivo()
+        with open(self.caminho, "a", newline="", encoding="utf-8") as arquivo:
+            csv.writer(arquivo).writerows(linhas)
         return len(linhas)
 
     def apagar_sinal(self, rotulo: str) -> int:
@@ -164,7 +193,8 @@ class RepositorioSinais:
         if faltando:
             raise DadosInvalidosError(
                 f"O CSV está em formato antigo (faltam colunas como '{faltando[0]}'). "
-                "Abra o programa de novo: ele converte o arquivo automaticamente."
+                "Abra o programa de novo: ele guarda o arquivo antigo em um backup "
+                "e começa um novo."
             )
         if tabela[cabecalho()].isnull().any().any():
             raise DadosInvalidosError(
@@ -180,8 +210,10 @@ class RepositorioSinais:
             DadosInvalidosError: Se o formato estiver errado.
         """
         tabela = self._ler_tabela()
+        # Garante a ordem de gravação dentro de cada rodada.
+        tabela = tabela.sort_values([COLUNA_RODADA, COLUNA_QUADRO], kind="stable")
         return ConjuntoDados(
-            X=tabela[nomes_features()].to_numpy(dtype=np.float64),
+            X=tabela[nomes_features_quadro()].to_numpy(dtype=np.float64),
             y=tabela[COLUNA_ROTULO].to_numpy(dtype=str),
             grupos=tabela[COLUNA_RODADA].to_numpy(),
         )
@@ -199,14 +231,18 @@ class RepositorioSinais:
         return {str(palavra): int(qtd) for palavra, qtd in contagem.items()}
 
     def exemplos_do_sinal(self, rotulo: str) -> np.ndarray:
-        """Devolve os exemplos de um sinal, na ordem em que foram gravados.
+        """Devolve a forma das mãos de um sinal, na ordem em que foi gravado.
+
+        Quadros sem nenhuma mão ficam de fora.
 
         Returns:
             Matriz (n, 126); com ``n = 0`` se o sinal não existir.
         """
         tabela = self._ler_tabela()
         linhas = tabela[tabela[COLUNA_ROTULO] == rotulo]
-        return linhas[nomes_features()].to_numpy(dtype=np.float64)
+        quadros = linhas[nomes_features_quadro()].to_numpy(dtype=np.float64)
+        com_mao = maos_presentes(quadros).any(axis=1)
+        return quadros[com_mao][:, IDX_MAOS]
 
 
 def remover_arquivo_se_existir(caminho: Path) -> bool:
