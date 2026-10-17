@@ -27,8 +27,10 @@ FUNDO = "#0B1020"
 PAINEL = "#111A2E"
 CIANO = "#00D7FF"
 TEXTO = "#F0F6FC"
-TEXTO_SUAVE = "#93A4BC"
-VERMELHO = "#FF7777"
+# Cores escolhidas no Penpot para ler bem sobre o fundo holográfico.
+TEXTO_DESCRICAO = "#FFFFFF"
+TEXTO_DETALHE = "#000000"
+VERMELHO = "#DE1616"
 
 
 def _liberar_recursos(
@@ -165,146 +167,211 @@ def _carregar_em_segundo_plano(
             eventos.put(("erro", (titulo, str(erro))))
 
 
-def _construir_carregamento(
-    raiz: tk.Tk,
-) -> tuple[tk.StringVar, tk.Label, ttk.Progressbar, tk.Button]:
-    """Desenha a tela inicial de carregamento."""
-    raiz.title("Kara Sygna")
-    raiz.geometry("580x370")
-    raiz.resizable(False, False)
-    raiz.configure(bg=FUNDO)
+class _TelaCarregamento:
+    """Tela de carregamento desenhada num Canvas, sobre a imagem de fundo.
 
-    # Centraliza a janela na tela.
-    raiz.update_idletasks()
-    x = (raiz.winfo_screenwidth() - 580) // 2
-    y = (raiz.winfo_screenheight() - 370) // 2
-    raiz.geometry(f"580x370+{x}+{y}")
+    No Canvas os textos ficam transparentes por cima da imagem; um ``Label``
+    teria um retângulo de cor sólida atrás de cada texto.
+    """
 
-    estilo = ttk.Style(raiz)
-    estilo.theme_use("clam")
-    estilo.configure(
-        "Kara.Horizontal.TProgressbar",
-        troughcolor=PAINEL,
-        background=CIANO,
-        bordercolor=PAINEL,
-        lightcolor=CIANO,
-        darkcolor=CIANO,
-        thickness=7,
-    )
+    LARGURA = 580
+    ALTURA = 370
+    MARGEM_X = 34
+    LARGURA_CONTEUDO = 512
+    #: Parte da imagem holográfica que aparece na tela (igual ao Penpot).
+    RECORTE_FUNDO = (122, 137, 702, 507)
 
-    conteudo = tk.Frame(raiz, bg=FUNDO)
-    conteudo.pack(fill="both", expand=True, padx=34, pady=24)
+    def __init__(self, raiz: tk.Tk) -> None:
+        from PIL import ImageTk
 
-    marca = tk.Frame(conteudo, bg=FUNDO)
-    marca.pack(fill="x")
+        from kara_sygna.interface import fundos
 
-    simbolo = tk.Label(
-        marca,
-        text="KS",
-        bg=CIANO,
-        fg=FUNDO,
-        font=("Arial", 18, "bold"),
-        width=3,
-        height=1,
-        padx=5,
-        pady=5,
-    )
-    simbolo.pack(side="left", padx=(0, 12))
+        raiz.title("Kara Sygna")
+        raiz.resizable(False, False)
+        raiz.configure(bg=FUNDO)
 
-    nome = tk.Label(
-        marca,
-        text="KARA SYGNA",
-        bg=FUNDO,
-        fg=TEXTO,
-        font=("Arial", 20, "bold"),
-    )
-    nome.pack(side="left", anchor="center")
+        # Centraliza a janela na tela.
+        raiz.update_idletasks()
+        x = (raiz.winfo_screenwidth() - self.LARGURA) // 2
+        y = (raiz.winfo_screenheight() - self.ALTURA) // 2
+        raiz.geometry(f"{self.LARGURA}x{self.ALTURA}+{x}+{y}")
 
-    versao = tk.Label(
-        marca,
-        text="VISÃO COMPUTACIONAL",
-        bg=FUNDO,
-        fg=CIANO,
-        font=("Arial", 8, "bold"),
-    )
-    versao.pack(side="right", anchor="center")
+        # Sem a barra de título do Windows, como uma splash screen.
+        # A janela principal devolve a barra em ``restaurar_barra``.
+        raiz.overrideredirect(True)
+        # Sem barra o Windows não dá foco sozinho; o foco é preciso para o Esc.
+        raiz.after(100, raiz.focus_force)
+        self._raiz = raiz
 
-    tk.Frame(conteudo, bg=CIANO, height=2).pack(
-        fill="x",
-        pady=(18, 25),
-    )
+        estilo = ttk.Style(raiz)
+        estilo.theme_use("clam")
+        estilo.configure(
+            "Kara.Horizontal.TProgressbar",
+            troughcolor=PAINEL,
+            background=CIANO,
+            bordercolor=PAINEL,
+            lightcolor=CIANO,
+            darkcolor=CIANO,
+            thickness=7,
+        )
 
-    tk.Label(
-        conteudo,
-        text="Seu espaço de sinais está sendo preparado.",
-        bg=FUNDO,
-        fg=TEXTO,
-        font=("Arial", 15, "bold"),
-        wraplength=500,
-    ).pack(anchor="w")
+        self._canvas = canvas = tk.Canvas(
+            raiz,
+            width=self.LARGURA,
+            height=self.ALTURA,
+            bg=FUNDO,
+            highlightthickness=0,
+            bd=0,
+        )
+        canvas.pack(fill="both", expand=True)
 
-    tk.Label(
-        conteudo,
-        text=(
-            "Estamos inicializando os componentes necessários "
-            "para reconhecer mãos e rosto."
-        ),
-        bg=FUNDO,
-        fg=TEXTO_SUAVE,
-        font=("Arial", 10),
-        wraplength=490,
-        justify="left",
-    ).pack(anchor="w", pady=(9, 22))
+        imagem = fundos.carregar(fundos.HOLOGRAFICO).crop(self.RECORTE_FUNDO)
+        self._foto_fundo = ImageTk.PhotoImage(imagem)  # guarda a referência
+        canvas.create_image(0, 0, image=self._foto_fundo, anchor="nw")
 
-    status = tk.StringVar(
-        master=raiz,
-        value="Preparando o ambiente...",
-    )
+        esquerda = self.MARGEM_X
+        direita = self.MARGEM_X + self.LARGURA_CONTEUDO
 
-    tk.Label(
-        conteudo,
-        textvariable=status,
-        bg=FUNDO,
-        fg=CIANO,
-        font=("Arial", 10, "bold"),
-        anchor="w",
-    ).pack(fill="x", pady=(0, 10))
+        # Marca: quadrado "KS", nome e subtítulo.
+        canvas.create_rectangle(esquerda, 24, esquerda + 59, 67, fill=CIANO, outline="")
+        canvas.create_text(
+            esquerda + 29.5,
+            45.5,
+            text="KS",
+            fill=FUNDO,
+            font=("Arial", 18, "bold"),
+        )
+        canvas.create_text(
+            109,
+            45,
+            text="KARA SYGNA",
+            fill=TEXTO,
+            font=("Arial", 20, "bold"),
+            anchor="w",
+        )
+        canvas.create_text(
+            direita - 4,
+            45,
+            text="VISÃO COMPUTACIONAL",
+            fill=CIANO,
+            font=("Arial", 8, "bold"),
+            anchor="e",
+        )
+        canvas.create_rectangle(esquerda, 85, direita, 87, fill=CIANO, outline="")
 
-    progresso = ttk.Progressbar(
-        conteudo,
-        mode="indeterminate",
-        style="Kara.Horizontal.TProgressbar",
-    )
-    progresso.pack(fill="x")
-    progresso.start(12)
+        canvas.create_text(
+            esquerda + 2,
+            127,
+            text="Seu espaço de sinais está sendo preparado.",
+            fill=TEXTO,
+            font=("Arial", 15, "bold"),
+            anchor="w",
+            width=500,
+        )
+        canvas.create_text(
+            esquerda + 3,
+            162,
+            text=(
+                "Estamos inicializando os componentes necessários "
+                "para reconhecer mãos e rosto."
+            ),
+            fill=TEXTO_DESCRICAO,
+            font=("Arial", 10),
+            anchor="w",
+            width=490,
+        )
 
-    detalhe = tk.Label(
-        conteudo,
-        text="Aguarde enquanto o aplicativo é inicializado.",
-        bg=FUNDO,
-        fg=TEXTO_SUAVE,
-        font=("Arial", 9),
-        anchor="w",
-        justify="left",
-        wraplength=500,
-    )
-    detalhe.pack(fill="x", pady=(10, 0))
+        self.status = tk.StringVar(master=raiz, value="Preparando o ambiente...")
+        texto_status = canvas.create_text(
+            esquerda + 3,
+            206,
+            text=self.status.get(),
+            fill=CIANO,
+            font=("Arial", 10, "bold"),
+            anchor="w",
+        )
+        self.status.trace_add(
+            "write",
+            lambda *_: canvas.itemconfigure(texto_status, text=self.status.get()),
+        )
 
-    tentar_novamente = tk.Button(
-        conteudo,
-        text="TENTAR NOVAMENTE",
-        bg=CIANO,
-        fg=FUNDO,
-        activebackground="#65E8FF",
-        activeforeground=FUNDO,
-        relief="flat",
-        cursor="hand2",
-        font=("Arial", 10, "bold"),
-        padx=12,
-        pady=7,
-    )
+        self.progresso = ttk.Progressbar(
+            canvas,
+            mode="indeterminate",
+            style="Kara.Horizontal.TProgressbar",
+        )
+        canvas.create_window(
+            esquerda,
+            227,
+            window=self.progresso,
+            anchor="nw",
+            width=self.LARGURA_CONTEUDO,
+            height=18,
+        )
+        self.progresso.start(12)
 
-    return status, detalhe, progresso, tentar_novamente
+        self._detalhe = canvas.create_text(
+            esquerda + 3,
+            258,
+            text="Aguarde enquanto o aplicativo é inicializado.",
+            fill=TEXTO_DETALHE,
+            font=("Arial", 9),
+            anchor="nw",
+            width=500,
+        )
+
+        self.botao_tentar = tk.Button(
+            canvas,
+            text="TENTAR NOVAMENTE",
+            bg=CIANO,
+            fg=FUNDO,
+            activebackground="#65E8FF",
+            activeforeground=FUNDO,
+            relief="flat",
+            cursor="hand2",
+            font=("Arial", 10, "bold"),
+            padx=12,
+            pady=7,
+        )
+        # Sem barra de título não há o "X": no erro, este botão fecha o app.
+        self.botao_fechar = tk.Button(
+            canvas,
+            text="FECHAR",
+            bg=PAINEL,
+            fg=TEXTO,
+            activebackground="#1B2940",
+            activeforeground=TEXTO,
+            relief="flat",
+            cursor="hand2",
+            font=("Arial", 10, "bold"),
+            padx=12,
+            pady=7,
+        )
+        self._janelas_botoes: list[int] = []
+
+    def definir_detalhe(self, texto: str, cor: str) -> None:
+        """Troca o texto de detalhe (embaixo da barra de progresso)."""
+        self._canvas.itemconfigure(self._detalhe, text=texto, fill=cor)
+
+    def mostrar_botoes(self) -> None:
+        """Mostra "TENTAR NOVAMENTE" e "FECHAR" logo abaixo do detalhe."""
+        self.esconder_botoes()
+        _, _, _, base = self._canvas.bbox(self._detalhe)
+        x = self.MARGEM_X
+        for botao in (self.botao_tentar, self.botao_fechar):
+            self._janelas_botoes.append(
+                self._canvas.create_window(x, base + 12, window=botao, anchor="nw")
+            )
+            x += botao.winfo_reqwidth() + 10
+
+    def esconder_botoes(self) -> None:
+        for janela in self._janelas_botoes:
+            self._canvas.delete(janela)
+        self._janelas_botoes.clear()
+
+    def restaurar_barra(self) -> None:
+        """Devolve a barra de título, antes de abrir a janela principal."""
+        self._raiz.overrideredirect(False)
 
 
 def executar() -> int:
@@ -321,7 +388,8 @@ def executar() -> int:
     janela_principal = None
     iniciado = False
 
-    status, detalhe, progresso, botao_tentar = _construir_carregamento(raiz)
+    tela = _TelaCarregamento(raiz)
+    status, progresso = tela.status, tela.progresso
 
     def fechar() -> None:
         """Encerra a tela e sinaliza o cancelamento da inicialização."""
@@ -351,6 +419,9 @@ def executar() -> int:
             pass
 
     raiz.protocol("WM_DELETE_WINDOW", fechar)
+    # Sem barra de título, o Esc também fecha a tela de carregamento.
+    raiz.bind("<Escape>", lambda _e: fechar())
+    tela.botao_fechar.configure(command=fechar)
 
     def iniciar_carregamento() -> None:
         """Inicia uma tentativa de carregamento sem bloquear o Tkinter."""
@@ -360,10 +431,9 @@ def executar() -> int:
             cancelamento.set()
 
         cancelamento = threading.Event()
-        botao_tentar.pack_forget()
-        detalhe.configure(
-            text="Aguarde enquanto o aplicativo é inicializado.",
-            fg=TEXTO_SUAVE,
+        tela.esconder_botoes()
+        tela.definir_detalhe(
+            "Aguarde enquanto o aplicativo é inicializado.", TEXTO_DETALHE
         )
         status.set("Preparando o ambiente...")
         progresso.start(12)
@@ -376,7 +446,7 @@ def executar() -> int:
         )
         carregador.start()
 
-    botao_tentar.configure(command=iniciar_carregamento)
+    tela.botao_tentar.configure(command=iniciar_carregamento)
 
     def verificar_eventos() -> None:
         """Recebe os resultados da thread e atualiza a interface."""
@@ -396,11 +466,11 @@ def executar() -> int:
                     titulo, mensagem = dados
                     progresso.stop()
                     status.set(titulo)
-                    detalhe.configure(
-                        text=(f"{mensagem}\n\nConfira a câmera e tente novamente."),
-                        fg=VERMELHO,
+                    tela.definir_detalhe(
+                        f"{mensagem}\n\nConfira a câmera e tente novamente.",
+                        VERMELHO,
                     )
-                    botao_tentar.pack(anchor="w", pady=(12, 0))
+                    tela.mostrar_botoes()
 
                 elif tipo == "pronto":
                     (
@@ -419,6 +489,8 @@ def executar() -> int:
                     # A thread de carregamento nunca manipula widgets.
                     for widget in raiz.winfo_children():
                         widget.destroy()
+                    raiz.unbind("<Escape>")
+                    tela.restaurar_barra()
 
                     try:
                         janela_principal = classe_janela(
@@ -462,11 +534,8 @@ def executar() -> int:
             logger.exception("Erro ao finalizar a inicialização")
             progresso.stop()
             status.set("Não foi possível abrir a interface.")
-            detalhe.configure(
-                text=str(erro),
-                fg=VERMELHO,
-            )
-            botao_tentar.pack(anchor="w", pady=(12, 0))
+            tela.definir_detalhe(str(erro), VERMELHO)
+            tela.mostrar_botoes()
 
         try:
             raiz.after(100, verificar_eventos)

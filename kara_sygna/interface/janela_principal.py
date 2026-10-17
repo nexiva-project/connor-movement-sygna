@@ -11,6 +11,7 @@ from tkinter import colorchooser, messagebox, scrolledtext, simpledialog, ttk
 
 import cv2
 import numpy as np
+from PIL import ImageTk
 
 from kara_sygna import config
 from kara_sygna.aplicacao.controlador import ControladorSinais, Modo
@@ -19,7 +20,7 @@ from kara_sygna.camera import Camera
 from kara_sygna.dados.repositorio import DadosInvalidosError
 from kara_sygna.ia.modelo_io import ModeloInvalidoError
 from kara_sygna.ia.treinamento import ResultadoTreino, TreinoImpossivelError
-from kara_sygna.interface import tema
+from kara_sygna.interface import fundos, tema
 from kara_sygna.interface.imagem_tk import (
     TAMANHO_MINIMO_PX,
     quadro_para_foto,
@@ -793,48 +794,7 @@ class JanelaPrincipal:
         fundo = tk.Frame(self._raiz, bg="#080D18")
         fundo.pack(fill="both", expand=True)
 
-        # Cabeçalho
-        cabecalho = tk.Frame(fundo, bg="#0D1525", height=76)
-        cabecalho.pack(fill="x")
-        cabecalho.pack_propagate(False)
-
-        marca = tk.Frame(cabecalho, bg="#0D1525")
-        marca.pack(side="left", padx=24, pady=10)
-
-        tk.Label(
-            marca,
-            text="◈",
-            bg="#0D1525",
-            fg="#00D7FF",
-            font=("Arial", 27, "bold"),
-        ).pack(side="left", padx=(0, 12))
-
-        textos_marca = tk.Frame(marca, bg="#0D1525")
-        textos_marca.pack(side="left")
-
-        tk.Label(
-            textos_marca,
-            text="KARA SYGNA",
-            bg="#0D1525",
-            fg="#F1F7FF",
-            font=("Arial", 19, "bold"),
-        ).pack(anchor="w")
-
-        tk.Label(
-            textos_marca,
-            text="RECONHECIMENTO DE SINAIS",
-            bg="#0D1525",
-            fg="#7D93B5",
-            font=("Arial", 8, "bold"),
-        ).pack(anchor="w", pady=(2, 0))
-
-        tk.Label(
-            cabecalho,
-            text="●  SISTEMA INICIALIZADO",
-            bg="#0D1525",
-            fg="#5CE1A5",
-            font=("Arial", 9, "bold"),
-        ).pack(side="right", padx=24)
+        self._construir_cabecalho(fundo)
 
         # Linha decorativa
         tk.Frame(fundo, bg="#00D7FF", height=2).pack(fill="x")
@@ -849,6 +809,10 @@ class JanelaPrincipal:
         self._construir_video(superior)
         self._construir_painel(superior)
         self._construir_texto(conteudo)
+
+        # Textura escura nos espaços entre os painéis.
+        for container in (fundo, conteudo, superior):
+            fundos.aplicar_textura(container)
 
         # Rodapé
         rodape = tk.Frame(fundo, bg="#0D1525", height=28)
@@ -877,6 +841,78 @@ class JanelaPrincipal:
             fg="#00D7FF",
             font=("Arial", 8, "bold"),
         ).pack(side="right", padx=18, pady=5)
+
+    def _construir_cabecalho(self, mestre: tk.Misc) -> None:
+        """Cabeçalho com a faixa holográfica de fundo.
+
+        É um Canvas para os textos ficarem por cima da imagem sem um
+        retângulo de cor atrás de cada um.
+        """
+        altura = 76
+        altura_faixa = 73  # os 3px de baixo mostram a textura escura
+        canvas = tk.Canvas(
+            mestre, height=altura, bg="#080D18", highlightthickness=0, bd=0
+        )
+        canvas.pack(fill="x")
+
+        textura = canvas.create_image(0, 0, anchor="nw")
+        faixa = canvas.create_image(0, 0, anchor="nw")
+
+        canvas.create_text(
+            36.5,
+            37.5,
+            text="◈",
+            fill="#00D7FF",
+            font=("Arial", 27, "bold"),
+        )
+        canvas.create_text(
+            61,
+            28,
+            text="KARA SYGNA",
+            fill="#F1F7FF",
+            font=("Arial", 19, "bold"),
+            anchor="w",
+        )
+        canvas.create_text(
+            61,
+            57,
+            text="RECONHECIMENTO DE SINAIS",
+            fill="#7D93B5",
+            font=("Arial", 8, "bold"),
+            anchor="w",
+        )
+        status = canvas.create_text(
+            0,
+            37.5,
+            text="●  SISTEMA INICIALIZADO",
+            fill="#5CE1A5",
+            font=("Arial", 9, "bold"),
+            anchor="e",
+        )
+
+        def redimensionar(evento: tk.Event) -> None:
+            largura = evento.width
+            if largura < 2:
+                return
+            # A imagem ocupa a largura toda; aparece só a parte de baixo dela.
+            holografico = fundos.carregar(fundos.HOLOGRAFICO)
+            altura_total = round(holografico.height * largura / holografico.width)
+            recorte = fundos.cobrir(
+                holografico, largura, max(altura_total, altura_faixa)
+            ).crop((0, altura_total - altura_faixa, largura, altura_total))
+            fundo_textura = fundos.carregar(fundos.TEXTURA).crop(
+                (0, 0, largura, altura)
+            )
+            # Guarda as referências, senão o Tk descarta as imagens.
+            self._fotos_cabecalho = (
+                ImageTk.PhotoImage(fundo_textura),
+                ImageTk.PhotoImage(recorte),
+            )
+            canvas.itemconfigure(textura, image=self._fotos_cabecalho[0])
+            canvas.itemconfigure(faixa, image=self._fotos_cabecalho[1])
+            canvas.coords(status, largura - 24, 37.5)
+
+        canvas.bind("<Configure>", redimensionar)
 
     # ----------------------------------------------------- tamanho da janela
 
