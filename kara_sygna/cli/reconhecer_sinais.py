@@ -18,6 +18,7 @@ from kara_sygna.camera import CameraIndisponivelError, abrir_camera
 from kara_sygna.ia.modelo_io import ModeloInvalidoError
 from kara_sygna.visao.detector_maos import DetectorMaos
 from kara_sygna.visao.detector_rosto import DetectorRosto
+from kara_sygna.visao.memoria_maos import MemoriaMaos
 from kara_sygna.visao.quadro import montar_vetor_quadro
 
 JANELA = "kara-sygna - Reconhecimento"
@@ -48,12 +49,13 @@ def main() -> int:
     print("Câmera aberta! Faça um sinal. 'q' sai, 'c' limpa o texto.")
     try:
         with DetectorMaos() as detector, DetectorRosto() as detector_rosto:
+            memoria = MemoriaMaos()
             while True:
                 quadro = camera.ler()
                 if quadro is None:
                     break
                 quadro = cv2.flip(quadro, 1)
-                resultado = detector.detectar(quadro)
+                resultado = memoria.aplicar(detector.detectar(quadro))
                 rosto = detector_rosto.detectar(quadro)
                 altura, largura = quadro.shape[:2]
                 vetor = montar_vetor_quadro(resultado, rosto, largura, altura)

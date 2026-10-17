@@ -59,9 +59,12 @@ def backends_da_plataforma(sistema: str | None = None) -> list[Backend]:
     sistema = sistema or platform.system()
     automatico = Backend("automático", cv2.CAP_ANY)
     if sistema == "Windows":
+        # MediaFoundation primeiro: em webcams comuns ele entrega 30 quadros
+        # por segundo, contra ~16 do DirectShow. Com mais quadros a mão anda
+        # menos entre um e outro e o MediaPipe a acompanha melhor.
         return [
-            Backend("DirectShow", cv2.CAP_DSHOW),
             Backend("MediaFoundation", cv2.CAP_MSMF),
+            Backend("DirectShow", cv2.CAP_DSHOW),
             automatico,
         ]
     if sistema == "Linux":

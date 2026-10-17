@@ -42,6 +42,7 @@ from kara_sygna.interface.janela_sinais import JanelaSinais
 from kara_sygna.interface.tarefas import ExecutorTk
 from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
 from kara_sygna.visao.detector_rosto import DetectorRosto, ResultadoRosto
+from kara_sygna.visao.memoria_maos import MemoriaMaos
 from kara_sygna.visao.quadro import montar_vetor_quadro
 from kara_sygna.visao.suavizacao import SuavizadorPontos
 
@@ -142,6 +143,7 @@ class JanelaPrincipal:
         self._camera = camera
         self._detector = detector
         self._detector_rosto = detector_rosto
+        self._memoria_maos = MemoriaMaos()
 
         self._arquivo_config_suavizacao = Path.home() / ".kara_sygna_suavizacao.json"
 
@@ -1772,7 +1774,10 @@ class JanelaPrincipal:
         """Suaviza cópias para desenhar; os dados originais vão para a IA."""
         quadro_original = quadro.copy()
 
-        resultado_maos = self._detector.detectar(quadro_original)
+        # Mãos que "piscaram" (quadro borrado) continuam valendo por um instante.
+        resultado_maos = self._memoria_maos.aplicar(
+            self._detector.detectar(quadro_original)
+        )
         resultado_rosto = self._detector_rosto.detectar(quadro_original)
 
         # Os botões de exibição só escondem o desenho.
@@ -1842,6 +1847,8 @@ class JanelaPrincipal:
         else:
             self._suavizador_maos.limpar()
 
+        self._escrever_contador_maos(quadro, resultado_maos)
+
         # Contagem antes do ensino e parada automática no fim do tempo.
         evento = self._temporizador.atualizar()
         if evento is Evento.COMECAR:
@@ -1877,6 +1884,25 @@ class JanelaPrincipal:
                 )
 
         self._mostrar(quadro)
+
+    def _escrever_contador_maos(self, quadro, resultado_maos) -> None:
+        """Mostra quantas mãos a IA está recebendo (e quantas vieram da memória)."""
+        total = len(getattr(resultado_maos, "multi_hand_landmarks", None) or [])
+        lembradas = self._memoria_maos.lembradas
+        texto = f"MAOS: {total}" + (f" ({lembradas} lembrada)" if lembradas else "")
+        cor = (92, 225, 165) if total == 2 else (0, 200, 255)
+        altura = quadro.shape[0]
+        cv2.rectangle(quadro, (10, altura - 38), (230, altura - 10), (15, 15, 18), -1)
+        cv2.putText(
+            quadro,
+            texto,
+            (18, altura - 17),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            cor,
+            1,
+            cv2.LINE_AA,
+        )
 
     def _texto_do_temporizador(self, texto_video: str) -> str:
         """Junta a contagem ou o tempo que falta ao texto sobre a câmera."""

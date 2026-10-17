@@ -21,6 +21,7 @@ from kara_sygna.aplicacao.inicializacao import preparar_ambiente
 from kara_sygna.camera import Camera, CameraIndisponivelError, abrir_camera
 from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
 from kara_sygna.visao.detector_rosto import DetectorRosto
+from kara_sygna.visao.memoria_maos import MemoriaMaos
 from kara_sygna.visao.quadro import montar_vetor_quadro
 
 # Quadros da câmera com mão por rodada. Quais deles vão para o CSV é decidido
@@ -50,6 +51,7 @@ def gravar_rodada(
         ``False`` se o usuário interrompeu com 'q' (ou a câmera falhou).
     """
     controlador.iniciar_ensino(palavra)
+    memoria = MemoriaMaos()
     inicio = time.monotonic() + SEGUNDOS_CONTAGEM
     gravados = 0
     try:
@@ -65,7 +67,7 @@ def gravar_rodada(
                     (0, 200, 255),
                 )
             else:
-                resultado = detector.detectar(quadro)
+                resultado = memoria.aplicar(detector.detectar(quadro))
                 rosto = detector_rosto.detectar(quadro)
                 altura, largura = quadro.shape[:2]
                 controlador.processar_quadro(

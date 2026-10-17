@@ -199,6 +199,11 @@ class _TelaCarregamento:
         # Sem a barra de título do Windows, como uma splash screen.
         # A janela principal devolve a barra em ``restaurar_barra``.
         raiz.overrideredirect(True)
+        # "Sempre na frente": aberta por um terminal dentro de outro programa
+        # (VS Code, Claude...), o Windows não deixa a janela vir para a frente
+        # e ela, sem barra nem ícone na barra de tarefas, ficava escondida.
+        raiz.attributes("-topmost", True)
+        raiz.lift()
         # Sem barra o Windows não dá foco sozinho; o foco é preciso para o Esc.
         raiz.after(100, raiz.focus_force)
         self._raiz = raiz
@@ -370,8 +375,16 @@ class _TelaCarregamento:
         self._janelas_botoes.clear()
 
     def restaurar_barra(self) -> None:
-        """Devolve a barra de título, antes de abrir a janela principal."""
-        self._raiz.overrideredirect(False)
+        """Devolve a barra de título, antes de abrir a janela principal.
+
+        A janela principal também abre na frente das outras, mas deixa de ser
+        "sempre na frente" logo depois, para não cobrir os outros programas.
+        """
+        raiz = self._raiz
+        raiz.overrideredirect(False)
+        raiz.lift()
+        raiz.after(800, lambda: raiz.attributes("-topmost", False))
+        raiz.after(850, raiz.focus_force)
 
 
 def executar() -> int:

@@ -3,17 +3,22 @@
 ## [Não lançado]
 
 ### Adicionado
+- Memória da mão: se uma mão some por até `config.MEMORIA_MAO_S` (0,3 s), a última posição dela continua valendo, no desenho e na IA. Tapa os quadros borrados no meio de sinais com movimento.
+- Contador `MAOS: n` sobre a imagem da câmera (verde com 2 mãos; avisa quando uma mão veio da memória).
 - A IA passa a olhar o rosto: distância de cada ponta de dedo até testa, olhos, nariz, bochechas, boca e queixo, a expressão facial e a posição das mãos em relação ao nariz. Em Libras, o lugar do sinal faz parte dele.
 - Enter (ou COMEÇAR A ENSINAR) faz uma contagem de 3 s (`config.SEGUNDOS_CONTAGEM_ENSINO`) e só então começa a gravar. No campo **TEMPO DE GRAVAÇÃO**, embaixo da câmera, escolhe-se por quantos segundos gravar; no fim, a gravação para sozinha. Vazio: grava até parar. Enter na contagem ou na gravação para na hora.
 - Sinais com movimento: a IA olha os últimos `QUADROS_POR_JANELA` quadros (de onde o pulso veio, quanto andou, quanto a mão mudou), não só um quadro.
 
 ### Alterado
+- No Windows, a câmera abre primeiro pelo MediaFoundation (30 quadros por segundo; o DirectShow entregava ~16). Abrir demora ~1 s a mais.
+- A detecção das mãos exige 50% de certeza (antes 70%): mãos borradas pelo movimento eram descartadas.
 - O ensino grava os quadros em sequência, em lotes, e o CSV ganhou a coluna `quadro`. Quais quadros entram é escolhido em `config.MODO_QUADROS`: `"mudanca"` (padrão; o filtro original, que só grava quando a forma ou o lugar da mão muda, mais 1 quadro a cada `PARADO_USAR_A_CADA_S` com a mão parada) ou `"fixo"` (1 a cada `USAR_1_A_CADA_QUADROS`). O reconhecimento usa o mesmo modo. O começo e o fim da gravação sem mão não são gravados. Dados do formato antigo vão para um backup e precisam ser gravados de novo.
 - O modelo é salvo comprimido (cerca de 3 vezes menor) e o CSV usa 4 casas decimais.
 - O espelhamento (sinal da mão direita valer para a esquerda) é feito no treino, na gravação inteira, em vez de duplicar linhas no CSV.
 - O reconhecimento avalia cada janela uma vez. As 31 rotações testadas a cada quadro foram removidas: escolher a rotação mais confiante aumentava os falsos positivos. As inclinações continuam sendo aprendidas pelo aumento de dados no treino.
 
 ### Corrigido
+- A tela de carregamento abria escondida atrás de outro programa quando o app era iniciado por um terminal dentro dele (VS Code, Claude); agora ela e a janela principal abrem na frente.
 - A câmera que entregava 16:9 achatava as mãos para a IA; os quadros agora são recortados para 4:3.
 - Duas rodadas iniciadas no mesmo segundo recebiam o mesmo identificador.
 

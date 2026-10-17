@@ -36,8 +36,13 @@ PAUSA_ENTRE_LEITURAS_S = 0.05
 # MediaPipe (detecção das mãos)
 # ---------------------------------------------------------------------------
 MAX_MAOS = 2
-CONFIANCA_DETECCAO = 0.7
+# 0.5: com 0.7, mãos borradas pelo movimento eram descartadas (no teste com
+# o sinal "carro", 42% dos quadros ficavam sem nenhuma mão; com 0.5, 24%).
+CONFIANCA_DETECCAO = 0.5
 CONFIANCA_RASTREIO = 0.5
+# Se uma mão some por até estes segundos (quadro borrado), continua valendo a
+# última posição dela, no desenho e na IA. 0 = desliga.
+MEMORIA_MAO_S = 0.3
 
 # O frame é espelhado antes de ser enviado ao MediaPipe; com isso os rótulos
 # "Left"/"Right" saem trocados nesta configuração. Mudar este valor altera o

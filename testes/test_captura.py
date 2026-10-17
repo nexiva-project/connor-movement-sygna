@@ -52,7 +52,7 @@ RAPIDO = {"tentativas_leitura": 3, "pausa_s": 0}
 
 
 def test_backends_por_sistema():
-    assert next(b.nome for b in backends_da_plataforma("Windows")) == "DirectShow"
+    assert next(b.nome for b in backends_da_plataforma("Windows")) == "MediaFoundation"
     assert [b.nome for b in backends_da_plataforma("Linux")] == ["V4L2", "automático"]
     assert "DirectShow" not in [b.nome for b in backends_da_plataforma("Linux")]
     assert backends_da_plataforma("Darwin")[0].nome == "AVFoundation"

@@ -97,5 +97,6 @@ python -m testes.manuais.teste_contar_dedos
 - **`No module named 'tkinter'`**: `sudo apt install python3-tk` (e recrie a `.venv` com o Python do sistema).
 - **`mp.solutions` não existe**: versão errada do MediaPipe. Use Python 3.12 e `mediapipe==0.10.21`.
 - **Dados antigos**: `dados_sinais.csv` e `modelo_sinais.pkl` da raiz (ou de `src/`) são copiados para `armazenamento/` na primeira execução. Um CSV de formato antigo (só a forma das mãos, sem rosto nem sequência) é guardado como `dados_sinais_formato_antigo_<data>.csv`, junto com o modelo antigo; grave os sinais de novo.
+- **Só uma mão aparece / mão some no movimento**: confira o contador `MAOS` sobre a câmera. Mantenha as duas mãos dentro da imagem, com luz na frente (não uma janela atrás) e roupa de cor diferente da pele; movimento rápido com pouca luz borra a mão e o MediaPipe a perde.
 - Os números do modelo dependem da proporção da imagem (4:3). A câmera é aberta em 640×480; mude em `config.py` só se for gravar tudo de novo.
 - `INVERTER_LATERALIDADE` em `config.py` define qual mão é "esquerda" nos dados. Se mudar, grave os sinais de novo.
