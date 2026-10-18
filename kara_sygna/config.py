@@ -57,10 +57,13 @@ MEMORIA_MAO_S = 0.3
 
 # MediaPipe Pose (braços): 0 = modelo leve (~13 ms por quadro), 1 = completo.
 COMPLEXIDADE_POSE = 0
-# Uma mão só vale se o pulso dela estiver a até esta distância do pulso de um
-# braço do Pose, em larguras de ombro (tira as "mãos fantasmas"). O pulso do
-# Pose fica, em média, a ~0,25 larguras de ombro do pulso da mão.
-DISTANCIA_MAO_PULSO = 0.6
+# Conferência das mãos pelos braços (tira as "mãos fantasmas"), em larguras
+# de ombro. Só é descartada a mão mais longe que isto dos dois pulsos do Pose
+# (o Pose erra o pulso com as mãos embaixo; com 0,6 ele descartava a mão
+# esquerda de verdade no sinal "carro").
+DISTANCIA_MAO_PULSO = 1.5
+# Duas mãos mais perto que isto uma da outra são a mesma mão (fantasma).
+DISTANCIA_MAOS_DUPLICADAS = 0.35
 
 # O frame é espelhado (como um espelho) antes de ir para o MediaPipe, e o
 # MediaPipe já espera a imagem espelhada: o rótulo "Right" é a mão direita de

@@ -94,3 +94,22 @@ def test_memoria_respeita_o_lado_dado_pelos_bracos():
     assert resultado.lados == ["esq", "dir"]
     assert resultado.multi_hand_landmarks[slots["dir"]] is direita
     assert np.isclose(separar_maos(resultado)["esq"][0, 0], 0.30)
+
+
+def test_mao_real_com_pulso_do_pose_errado_nao_e_descartada():
+    """No "carro", o Pose põe o pulso longe (até fora da imagem): a mão fica."""
+    esquerda, direita = _mao(0.30, 0.80), _mao(0.70, 0.80)
+    resultado = resultado_falso((esquerda, "Left"), (direita, "Right"))
+    # Pulsos do Pose a ~1 largura de ombro abaixo das mãos (fora da imagem).
+    corpo = _corpo((0.30, 1.05), (0.70, 1.05))
+    conferido = conferir_maos(resultado, corpo, LARGURA, ALTURA)
+    assert conferido.descartadas == 0 and len(conferido.multi_hand_landmarks) == 2
+
+
+def test_duas_deteccoes_da_mesma_mao_viram_uma():
+    mao, quase_igual = _mao(0.40, 0.60), _mao(0.41, 0.61)
+    resultado = resultado_falso((mao, "Left"), (quase_igual, "Right"))
+    conferido = conferir_maos(
+        resultado, _corpo((0.40, 0.61), (0.75, 0.9)), LARGURA, ALTURA
+    )
+    assert conferido.descartadas == 1 and conferido.lados == ["esq"]

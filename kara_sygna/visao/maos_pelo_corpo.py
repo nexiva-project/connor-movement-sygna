@@ -5,21 +5,27 @@ Por que existe
 Com a exigência de detecção baixa e o realce de pele, o MediaPipe às vezes
 acha uma "segunda mão" que não existe. Num teste com o sinal ``neutro``, só
 com a mão esquerda, apareceu uma mão "direita" em 27 de 69 quadros, sempre
-perto da mão esquerda, enquanto o braço direito estava parado do outro lado.
+colada na mão esquerda.
 
-Toda mão de verdade fica na ponta de um braço. Então:
+Regras (o Pose acerta o lado do braço, mas erra a posição exata do pulso,
+principalmente com as mãos embaixo, perto da borda da imagem: no sinal
+"carro" ele chegava a pôr o pulso fora da imagem, longe da mão de verdade):
 
-* uma mão só vale se o pulso dela estiver perto do pulso de um braço do Pose
-  (até ``config.DISTANCIA_MAO_PULSO`` larguras de ombro);
-* cada braço fica com no máximo uma mão (a mais perto do pulso);
-* o lado da mão ("esq"/"dir") é o lado do braço, e não o palpite do
-  MediaPipe, que erra mais (e inverte com as mãos cruzadas).
+* **mão duplicada**: duas mãos quase no mesmo lugar (até
+  ``config.DISTANCIA_MAOS_DUPLICADAS`` larguras de ombro) são a mesma mão;
+  fica a mais perto de um pulso do braço;
+* **mão perdida**: só é descartada a mão muito longe dos dois pulsos (mais
+  de ``config.DISTANCIA_MAO_PULSO`` larguras de ombro);
+* **lado**: cada mão recebe o lado do braço pela melhor combinação
+  mão-braço (menor distância somada), e não pelo palpite do MediaPipe: nos
+  vídeos testados, quando os dois discordavam, o braço acertou 82 de 83.
 
 Sem corpo na imagem, as mãos passam sem mudança.
 """
 
 from __future__ import annotations
 
+from itertools import permutations
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,6 +35,7 @@ from kara_sygna import config
 from kara_sygna.visao.quadro import POSE_DOS_SLOTS
 
 _VISIBILIDADE_OMBRO = 0.5
+_LADOS = ("esq", "dir")
 
 
 def conferir_maos(
@@ -45,8 +52,8 @@ def conferir_maos(
         resultado_corpo: Resultado de ``DetectorCorpo.detectar`` (ou ``None``).
         largura: Largura do quadro, em pixels.
         altura: Altura do quadro, em pixels.
-        distancia_maxima: Distância máxima pulso da mão - pulso do braço, em
-            larguras de ombro. Padrão: ``config.DISTANCIA_MAO_PULSO``.
+        distancia_maxima: Distância máxima pulso da mão - pulso do braço mais
+            perto, em larguras de ombro. Padrão: ``config.DISTANCIA_MAO_PULSO``.
 
     Returns:
         O próprio ``resultado_maos`` se não houver corpo; senão, um objeto com
@@ -64,7 +71,7 @@ def conferir_maos(
     def px(ponto) -> np.ndarray:
         return np.array([ponto.x, ponto.y]) * escala
 
-    ombros = [pontos[POSE_DOS_SLOTS[lado][0]] for lado in ("esq", "dir")]
+    ombros = [pontos[POSE_DOS_SLOTS[lado][0]] for lado in _LADOS]
     if any(getattr(o, "visibility", 1.0) < _VISIBILIDADE_OMBRO for o in ombros):
         return resultado_maos
     largura_ombros = float(np.linalg.norm(px(ombros[0]) - px(ombros[1])))
@@ -74,33 +81,56 @@ def conferir_maos(
     limite = (
         config.DISTANCIA_MAO_PULSO if distancia_maxima is None else distancia_maxima
     )
-    pulsos = {lado: px(pontos[POSE_DOS_SLOTS[lado][2]]) for lado in ("esq", "dir")}
+    pulsos = np.array([px(pontos[POSE_DOS_SLOTS[lado][2]]) for lado in _LADOS])
+    validas = [
+        i for i, lm in enumerate(listas) if len(getattr(lm, "landmark", [])) >= 21
+    ]
+    maos = {i: px(listas[i].landmark[0]) for i in validas}
 
-    # Cada par (mão, braço) perto o bastante, do mais perto para o mais longe.
-    pares = sorted(
-        (float(np.linalg.norm(px(lm.landmark[0]) - pulso)) / largura_ombros, i, lado)
-        for i, lm in enumerate(listas)
-        if len(getattr(lm, "landmark", [])) >= 21
-        for lado, pulso in pulsos.items()
+    def ao_braco(i: int) -> float:
+        """Distância da mão ``i`` ao pulso de braço mais perto (em ombros)."""
+        return float(np.min(np.linalg.norm(pulsos - maos[i], axis=1))) / largura_ombros
+
+    # 1. Mão muito longe dos dois braços: perdida.
+    ficam = [i for i in validas if ao_braco(i) <= limite]
+    # 2. Duas mãos quase no mesmo lugar: a mesma mão (fica a mais perto do braço).
+    ficam.sort(key=ao_braco)
+    unicas: list[int] = []
+    for i in ficam:
+        if all(
+            np.linalg.norm(maos[i] - maos[j]) / largura_ombros
+            >= config.DISTANCIA_MAOS_DUPLICADAS
+            for j in unicas
+        ):
+            unicas.append(i)
+    unicas = unicas[: len(_LADOS)]
+
+    # 3. Lado de cada mão: a combinação mão-braço com a menor distância somada.
+    # Em 83 quadros de vídeo em que o lado do MediaPipe e o do braço
+    # discordavam, o braço acertou 82 (pela posição da mão em relação ao nariz).
+    custos = sorted(
+        (
+            sum(
+                float(np.linalg.norm(maos[i] - pulsos[lado]))
+                for i, lado in zip(unicas, lados, strict=True)
+            ),
+            lados,
+        )
+        for lados in permutations(range(len(_LADOS)), len(unicas))
     )
-    lado_da_mao: dict[int, str] = {}
-    for distancia, indice, lado in pares:
-        if distancia > limite:
-            break
-        if indice not in lado_da_mao and lado not in lado_da_mao.values():
-            lado_da_mao[indice] = lado
+    ordem = sorted(unicas)
+    melhor = dict(zip(unicas, custos[0][1], strict=True)) if custos else {}
 
     lateralidades = list(getattr(resultado_maos, "multi_handedness", None) or [])
     mundos = list(getattr(resultado_maos, "multi_hand_world_landmarks", None) or [])
-    ficam = sorted(lado_da_mao)
     return SimpleNamespace(
-        multi_hand_landmarks=[listas[i] for i in ficam],
+        multi_hand_landmarks=[listas[i] for i in ordem],
         multi_handedness=[
-            lateralidades[i] if i < len(lateralidades) else None for i in ficam
+            lateralidades[i] if i < len(lateralidades) else None for i in ordem
         ],
         multi_hand_world_landmarks=[
-            mundos[i] if i < len(mundos) else None for i in ficam
+            mundos[i] if i < len(mundos) else None for i in ordem
         ],
-        lados=[lado_da_mao[i] for i in ficam],
-        descartadas=len(listas) - len(ficam),
+        lados=[_LADOS[melhor[i]] for i in ordem],
+        descartadas=len(listas) - len(ordem),
     )
