@@ -1,6 +1,6 @@
 # Changelog
 
-## [Não lançado]
+## [0.6.0] - 2026-10-18
 
 ### Adicionado
 - Um Enter grava o sinal 3 vezes seguidas, em ritmos diferentes (`config.RITMOS_ENSINO`): "carro 1/3: devagar", "carro 2/3: médio", "carro 3/3: rápido", cada uma como uma rodada (o pré-sinal, se houver, é gravado uma vez antes). O `neutro` grava 1/3, 2/3, 3/3. Enter ou PARAR cancelam o resto; o que já foi gravado fica salvo.
@@ -31,6 +31,7 @@
 - O reconhecimento avalia cada janela uma vez. As 31 rotações testadas a cada quadro foram removidas: escolher a rotação mais confiante aumentava os falsos positivos. As inclinações continuam sendo aprendidas pelo aumento de dados no treino.
 
 ### Corrigido
+- No Ubuntu a janela abria em branco e só aparecia depois de minimizar. No Linux a tela de carregamento deixa de usar `overrideredirect` (o XWayland não desenha essa janela) e só é mostrada com o conteúdo pronto; em seguida ela é remapeada uma vez, o mesmo efeito de minimizar e restaurar.
 - No Linux a janela principal não abria ("bad cursor spec \"size_nw_se\""): esse cursor da alça de redimensionar só existe no Windows. Fora do Windows agora usa "bottom_right_corner".
 - A conferência pelos braços descartava a mão esquerda de verdade no sinal "carro" (o Pose erra o pulso com as mãos embaixo). Agora só descarta mão muito longe dos dois braços (`DISTANCIA_MAO_PULSO = 1.5`) ou duplicada (`DISTANCIA_MAOS_DUPLICADAS`), e o lado da mão vem sempre do braço (nos vídeos, quando o MediaPipe e o braço discordavam, o braço acertou 82 de 83). No vídeo do carro: 0 mãos reais descartadas (antes 16).
 - O app não abria se o download do modelo Pose falhasse (sem internet ou sem permissão): agora segue sem os braços e avisa no log.
@@ -39,7 +40,7 @@
 - O medidor de qualidade avisava "segunda mão sumiu" no pré-sinal (uma mão) e "mãos fora" no `neutro`; agora conta as duas mãos depois do preenchimento e não reclama desses casos.
 - O diagnóstico marcava `falta_pre` quando o problema era a dúvida entre dois sinais (margem pequena).
 - O campo de segundos da gravação também mudava a ajuda do pré-sinal no reconhecimento; agora a ajuda usa `SEGUNDOS_ESPERA_SINAL_PADRAO`.
-- A lista de sinais recarregava os modelos do disco a cada atualização; `scipy` entrou no `requirements.txt`.
+- A lista de sinais recarregava os modelos do disco a cada atualização.
 - O pré-sinal "s" e o "S" viravam dois pré-sinais diferentes (os exemplos se dividiam). Agora o nome do pré-sinal não diferencia maiúscula de minúscula, e os já gravados se juntam sozinhos.
 - "Mão fantasma": aparecia uma segunda mão perto da mão de verdade (no `neutro` só com a esquerda, uma "direita" em 27 de 69 quadros). Agora cada mão é conferida pelos braços do Pose: só vale a mão perto do pulso de um braço (`config.DISTANCIA_MAO_PULSO`), cada braço fica com uma mão e o lado da mão é o lado do braço. No vídeo do "carro", com as duas mãos reais, só 8 de 396 mãos foram descartadas.
 - A mão direita aparecia como "esquerda" (desenho, dados e diagnóstico): `INVERTER_LATERALIDADE` agora é `False`, porque o MediaPipe já espera a imagem espelhada. O CSV ganhou a coluna `formato_v2` e o anterior vai para o backup sozinho (grave os sinais de novo).
@@ -47,6 +48,9 @@
 - A tela de carregamento abria escondida atrás de outro programa quando o app era iniciado por um terminal dentro dele (VS Code, Claude); agora ela e a janela principal abrem na frente.
 - A câmera que entregava 16:9 achatava as mãos para a IA; os quadros agora são recortados para 4:3.
 - Duas rodadas iniciadas no mesmo segundo recebiam o mesmo identificador.
+
+### Dependências
+- `scipy` (preenchimento suave da mão que some no meio da gravação).
 
 ## [0.5.0] - 2026-10-11
 
