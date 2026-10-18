@@ -179,5 +179,8 @@ SEGUNDOS_CONTAGEM_ENSINO = 3
 # Interface
 # ---------------------------------------------------------------------------
 INTERVALO_QUADRO_MS = 15
+# Tamanho da janela principal ao abrir (menor, se a tela for menor).
+LARGURA_JANELA_PADRAO = 1024
+ALTURA_JANELA_PADRAO = 768
 LARGURA_AREA_CAMERA = 900
 ALTURA_AREA_CAMERA = 510

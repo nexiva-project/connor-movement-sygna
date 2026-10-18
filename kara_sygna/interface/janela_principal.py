@@ -122,6 +122,65 @@ CURSOR_REDIMENSIONAR = (
 )
 
 
+def area_rolavel(mestre: tk.Misc, fundo: str) -> tk.Frame:
+    """Cria uma área com barra de rolagem vertical e devolve o quadro de dentro.
+
+    A roda do mouse rola a área enquanto o ponteiro está sobre ela (Windows e
+    macOS usam ``<MouseWheel>``; o Linux usa os botões 4 e 5). A barra só
+    aparece quando o conteúdo não cabe.
+    """
+    canvas = tk.Canvas(mestre, bg=fundo, highlightthickness=0, bd=0)
+    barra = tk.Scrollbar(mestre, orient="vertical", command=canvas.yview)
+    conteudo = tk.Frame(canvas, bg=fundo)
+    janela_interna = canvas.create_window((0, 0), window=conteudo, anchor="nw")
+
+    def atualizar(_evento=None) -> None:
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        cabe = conteudo.winfo_reqheight() <= canvas.winfo_height()
+        if cabe and barra.winfo_ismapped():
+            barra.pack_forget()
+            canvas.yview_moveto(0)
+        elif not cabe and not barra.winfo_ismapped():
+            barra.pack(side="right", fill="y", before=canvas)
+
+    def ajustar_largura(evento) -> None:
+        canvas.itemconfigure(janela_interna, width=evento.width)
+        atualizar()
+
+    def dentro_da_area(evento) -> bool:
+        """O ponteiro está sobre esta área (ou sobre algo dentro dela)?"""
+        widget = canvas.winfo_containing(evento.x_root, evento.y_root)
+        while widget is not None:
+            if widget is canvas:
+                return True
+            widget = widget.master
+        return False
+
+    def rolar(evento) -> None:
+        try:
+            if not canvas.winfo_exists() or not barra.winfo_ismapped():
+                return
+            if not dentro_da_area(evento):
+                return
+        except (tk.TclError, KeyError):
+            return
+        if getattr(evento, "num", None) in (4, 5):
+            passos = -1 if evento.num == 4 else 1
+        else:
+            passos = -1 if evento.delta > 0 else 1
+        canvas.yview_scroll(passos * 3, "units")
+
+    # Cada área confere se o ponteiro está sobre ela; "+" mantém as outras.
+    for sequencia in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        canvas.bind_all(sequencia, rolar, add="+")
+
+    canvas.configure(yscrollcommand=barra.set)
+    conteudo.bind("<Configure>", atualizar)
+    canvas.bind("<Configure>", ajustar_largura)
+    canvas.pack(side="left", fill="both", expand=True)
+    return conteudo
+
+
 def _formatar_resolucao(largura: int, altura: int) -> str:
     return f"{largura}×{altura}"
 
@@ -218,15 +277,9 @@ class JanelaPrincipal:
         largura_tela = raiz.winfo_screenwidth()
         altura_tela = raiz.winfo_screenheight()
 
-        # Usa quase toda a área disponível, respeitando telas menores.
-        largura_janela = min(
-            largura_tela,
-            max(LARGURA_MINIMA_JANELA, int(largura_tela * 0.96)),
-        )
-        altura_janela = min(
-            altura_tela,
-            max(ALTURA_MINIMA_JANELA, int(altura_tela * 0.92)),
-        )
+        # Tamanho padrão (config.LARGURA/ALTURA_JANELA_PADRAO), sem passar da tela.
+        largura_janela = min(largura_tela, config.LARGURA_JANELA_PADRAO)
+        altura_janela = min(altura_tela, config.ALTURA_JANELA_PADRAO)
 
         # Centraliza a janela no monitor.
         pos_x = max(0, (largura_tela - largura_janela) // 2)
@@ -408,25 +461,7 @@ class JanelaPrincipal:
 
         recipiente = tk.Frame(janela, bg=tema.FUNDO)
         recipiente.pack(fill="both", expand=True)
-
-        canvas = tk.Canvas(recipiente, bg=tema.FUNDO, highlightthickness=0)
-        barra = tk.Scrollbar(recipiente, orient="vertical", command=canvas.yview)
-        conteudo = tk.Frame(canvas, bg=tema.FUNDO)
-
-        janela_interna = canvas.create_window((0, 0), window=conteudo, anchor="nw")
-        canvas.configure(yscrollcommand=barra.set)
-
-        conteudo.bind(
-            "<Configure>",
-            lambda _evento: canvas.configure(scrollregion=canvas.bbox("all")),
-        )
-        canvas.bind(
-            "<Configure>",
-            lambda evento: canvas.itemconfigure(janela_interna, width=evento.width),
-        )
-
-        canvas.pack(side="left", fill="both", expand=True)
-        barra.pack(side="right", fill="y")
+        conteudo = area_rolavel(recipiente, tema.FUNDO)
 
         tk.Label(
             conteudo,
@@ -1339,6 +1374,9 @@ class JanelaPrincipal:
         )
         painel.pack(side="right", fill="y")
         painel.pack_propagate(False)
+        # Em telas mais baixas (ex.: 1024x768) os controles não cabem na altura:
+        # o painel rola, em vez de esconder os botões de baixo.
+        painel = area_rolavel(painel, "#0D1525")
 
         tk.Label(
             painel,

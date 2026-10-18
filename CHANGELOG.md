@@ -17,6 +17,7 @@
 - Sinais com movimento: a IA olha os últimos `QUADROS_POR_JANELA` quadros (de onde o pulso veio, quanto andou, quanto a mão mudou), não só um quadro.
 
 ### Alterado
+- A janela principal abre em 1024x768 (`config.LARGURA_JANELA_PADRAO` / `ALTURA_JANELA_PADRAO`; menor se a tela for menor). O painel de controle agora rola (barra e roda do mouse) quando não cabe na altura, em vez de esconder os botões de baixo.
 - A IA não usa mais o lugar exato das mãos (`config.USAR_LUGAR = False`): distância dos dedos até o rosto, posição das mãos e dos braços ficam fora da janela; ela olha a forma e o movimento. Com o lugar, o sinal "casa" só era reconhecido no lugar de sempre; sem ele, foi escrito em 6 de 7 lugares testados (esquerda, direita, alto, baixo, longe), sem nenhum sinal errado. Os dados continuam no CSV: basta treinar de novo; religue para sinais que só mudam pelo lugar.
 - Pré-sinal é só uma ajuda, nunca uma trava: qualquer sinal pode ser reconhecido a qualquer momento (antes, depois do "S", a casa ficava bloqueada por alguns segundos). Um sinal com pré-sinal precisa de 70% de certeza se o pré-sinal dele foi visto há pouco, e de 78% se não foi (`CONFIANCA_SEM_PRE_SINAL`). A exigência para ver o pré-sinal caiu de 70% para 50% (`CONFIANCA_PRE_SINAL`). O pré-sinal não aparece mais na tela (só no log e no diagnóstico: motivos `falta_pre` e `ok_sem_pre`).
 - A IA pode ser treinada com um sinal só (antes exigia 2). Com um sinal e sem `neutro`, toda mão na câmera é reconhecida como esse sinal.
