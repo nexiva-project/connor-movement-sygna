@@ -33,6 +33,29 @@ TEXTO_DETALHE = "#000000"
 VERMELHO = "#DE1616"
 
 
+def _x11(raiz: tk.Misc) -> bool:
+    """Diz se o Tk está no X11, inclusive no XWayland do Ubuntu."""
+    return sys.platform == "linux" and raiz.tk.call("tk", "windowingsystem") == "x11"
+
+
+def _sem_barra(raiz: tk.Tk) -> None:
+    """Esconde a barra de título da tela de carregamento.
+
+    No Windows ``overrideredirect`` tira a barra e a janela desenha na hora.
+    No XWayland do Ubuntu a mesma chamada deixa o quadro em branco até a
+    janela ser minimizada: o compositor não entrega um quadro novo para
+    uma janela fora do gerenciador. O tipo ``splash`` pede a barra
+    escondida ao gerenciador, que continua desenhando.
+    """
+    if _x11(raiz):
+        try:
+            raiz.attributes("-type", "splash")
+            return
+        except tk.TclError:
+            logger.exception("Não foi possível usar a janela do tipo splash")
+    raiz.overrideredirect(True)
+
+
 def _liberar_recursos(
     camera: Any = None,
     detector_maos: Any = None,
@@ -201,19 +224,28 @@ class _TelaCarregamento:
 
         from kara_sygna.interface import fundos
 
+        self._raiz = raiz
+        self._redesenhos: list[str] = []
+        self._geracao_redesenho = 0
+        # No XWayland a janela não pode aparecer antes dos widgets: o primeiro
+        # quadro em branco fica preso até minimizar. Esconde agora e só mostra
+        # em ``mostrar``, com o desenho pronto.
+        if _x11(raiz):
+            raiz.withdraw()
+
         raiz.title("Kara Sygna")
         raiz.resizable(False, False)
         raiz.configure(bg=FUNDO)
 
-        # Centraliza a janela na tela.
-        raiz.update_idletasks()
+        # Centraliza a janela na tela. O tamanho da tela vale mesmo escondida;
+        # um update aqui mapeava a janela vazia no Linux.
         x = (raiz.winfo_screenwidth() - self.LARGURA) // 2
         y = (raiz.winfo_screenheight() - self.ALTURA) // 2
         raiz.geometry(f"{self.LARGURA}x{self.ALTURA}+{x}+{y}")
 
-        # Sem a barra de título do Windows, como uma splash screen.
+        # Sem a barra de título, como uma splash screen.
         # A janela principal devolve a barra em ``restaurar_barra``.
-        raiz.overrideredirect(True)
+        _sem_barra(raiz)
         # "Sempre na frente": aberta por um terminal dentro de outro programa
         # (VS Code, Claude...), o Windows não deixa a janela vir para a frente
         # e ela, sem barra nem ícone na barra de tarefas, ficava escondida.
@@ -221,7 +253,6 @@ class _TelaCarregamento:
         raiz.lift()
         # Sem barra o Windows não dá foco sozinho; o foco é preciso para o Esc.
         raiz.after(100, raiz.focus_force)
-        self._raiz = raiz
 
         estilo = ttk.Style(raiz)
         estilo.theme_use("clam")
@@ -369,6 +400,70 @@ class _TelaCarregamento:
         )
         self._janelas_botoes: list[int] = []
 
+    def mostrar(self) -> None:
+        """Mostra a tela de carregamento já desenhada."""
+        raiz = self._raiz
+        if _x11(raiz):
+            raiz.update_idletasks()
+            raiz.deiconify()
+            raiz.lift()
+            # O primeiro map no XWayland ainda pode sair em branco. O redesenho
+            # abaixo repete o que o botão minimizar faz, com o conteúdo pronto.
+            self._agendar_redesenho()
+            return
+        raiz.lift()
+
+    def _cancelar_redesenho(self) -> None:
+        """Invalida um unmap/map que ainda não rodou."""
+        self._geracao_redesenho += 1
+        for identificador in self._redesenhos:
+            try:
+                self._raiz.after_cancel(identificador)
+            except tk.TclError:
+                pass
+        self._redesenhos.clear()
+
+    def _agendar_redesenho(self) -> None:
+        """Desmapeia e mapeia de novo para o XWayland soltar o quadro.
+
+        É o mesmo efeito de minimizar e restaurar, que era o único jeito de
+        a janela aparecer no Ubuntu. A geometria é reaplicada porque alguns
+        gerenciadores movem a janela ao escondê-la.
+        """
+        if not _x11(self._raiz):
+            return
+
+        self._cancelar_redesenho()
+        geracao = self._geracao_redesenho
+        raiz = self._raiz
+        geometria = raiz.geometry()
+
+        def esconder() -> None:
+            if geracao != self._geracao_redesenho:
+                return
+            try:
+                if not raiz.winfo_exists():
+                    return
+                raiz.withdraw()
+            except tk.TclError:
+                return
+            self._redesenhos.append(raiz.after(20, mostrar))
+
+        def mostrar() -> None:
+            if geracao != self._geracao_redesenho:
+                return
+            try:
+                if not raiz.winfo_exists():
+                    return
+                raiz.deiconify()
+                if geometria:
+                    raiz.geometry(geometria)
+                raiz.lift()
+            except tk.TclError:
+                pass
+
+        self._redesenhos.append(raiz.after(50, esconder))
+
     def definir_detalhe(self, texto: str, cor: str) -> None:
         """Troca o texto de detalhe (embaixo da barra de progresso)."""
         self._canvas.itemconfigure(self._detalhe, text=texto, fill=cor)
@@ -392,14 +487,47 @@ class _TelaCarregamento:
     def restaurar_barra(self) -> None:
         """Devolve a barra de título, antes de abrir a janela principal.
 
-        A janela principal também abre na frente das outras, mas deixa de ser
-        "sempre na frente" logo depois, para não cobrir os outros programas.
+        No Linux a janela é escondida antes da troca. Mudar o tipo com ela
+        visível deixa o miolo em branco até minimizar; ``exibir_janela_principal``
+        mostra de novo quando os widgets da janela principal já existem.
         """
+        self._cancelar_redesenho()
         raiz = self._raiz
+        if _x11(raiz):
+            raiz.withdraw()
+            try:
+                raiz.attributes("-type", "normal")
+            except tk.TclError:
+                logger.exception("Não foi possível devolver o tipo normal da janela")
+            raiz.overrideredirect(False)
+            return
         raiz.overrideredirect(False)
         raiz.lift()
-        raiz.after(800, lambda: raiz.attributes("-topmost", False))
-        raiz.after(850, raiz.focus_force)
+
+    def exibir_janela_principal(self) -> None:
+        """Mostra a janela principal e logo deixa de ficar sempre na frente."""
+        raiz = self._raiz
+        if _x11(raiz):
+            raiz.update_idletasks()
+            raiz.deiconify()
+            self._agendar_redesenho()
+        raiz.lift()
+        raiz.after(800, lambda: self._soltar_frente())
+        raiz.after(850, lambda: self._focar())
+
+    def _soltar_frente(self) -> None:
+        try:
+            if self._raiz.winfo_exists():
+                self._raiz.attributes("-topmost", False)
+        except tk.TclError:
+            pass
+
+    def _focar(self) -> None:
+        try:
+            if self._raiz.winfo_exists():
+                self._raiz.focus_force()
+        except tk.TclError:
+            pass
 
 
 def executar() -> int:
@@ -417,6 +545,7 @@ def executar() -> int:
     iniciado = False
 
     tela = _TelaCarregamento(raiz)
+    tela.mostrar()
     status, progresso = tela.status, tela.progresso
 
     def fechar() -> None:
@@ -532,6 +661,9 @@ def executar() -> int:
                             detector_corpo,
                         )
                         iniciado = True
+                        # Mostra só agora: no Linux a janela ficou escondida
+                        # durante a montagem, para não mapear um quadro vazio.
+                        tela.exibir_janela_principal()
 
                         # O loop Tkinter já está ativo; a janela principal
                         # agenda os próximos quadros sozinha.
@@ -548,6 +680,10 @@ def executar() -> int:
                             detector_corpo=detector_corpo,
                         )
                         iniciado = False
+                        try:
+                            raiz.deiconify()
+                        except tk.TclError:
+                            pass
                         messagebox.showerror(
                             "Inicialização",
                             f"Não foi possível abrir o Kara Sygna:\n\n{erro}",
