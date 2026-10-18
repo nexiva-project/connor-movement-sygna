@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import sys
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -113,6 +114,12 @@ RESOLUCOES_JANELA = (
 
 # Menor tamanho permitido para a janela (a menor resolução da lista).
 LARGURA_MINIMA_JANELA, ALTURA_MINIMA_JANELA = RESOLUCOES_JANELA[0]
+
+# Cursor da alça de redimensionar. "size_nw_se" só existe no Windows; no Linux
+# e no macOS o Tk dá erro com ele ("bad cursor spec") e a janela não abre.
+CURSOR_REDIMENSIONAR = (
+    "size_nw_se" if sys.platform.startswith("win") else "bottom_right_corner"
+)
 
 
 def _formatar_resolucao(largura: int, altura: int) -> str:
@@ -863,7 +870,7 @@ class JanelaPrincipal:
         # Alça no canto inferior direito para redimensionar arrastando.
         estilo = ttk.Style(self._raiz)
         estilo.configure("Kara.TSizegrip", background="#0D1525")
-        ttk.Sizegrip(rodape, style="Kara.TSizegrip", cursor="size_nw_se").pack(
+        ttk.Sizegrip(rodape, style="Kara.TSizegrip", cursor=CURSOR_REDIMENSIONAR).pack(
             side="right", anchor="se"
         )
 

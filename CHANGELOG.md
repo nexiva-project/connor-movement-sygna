@@ -30,6 +30,7 @@
 - O reconhecimento avalia cada janela uma vez. As 31 rotações testadas a cada quadro foram removidas: escolher a rotação mais confiante aumentava os falsos positivos. As inclinações continuam sendo aprendidas pelo aumento de dados no treino.
 
 ### Corrigido
+- No Linux a janela principal não abria ("bad cursor spec \"size_nw_se\""): esse cursor da alça de redimensionar só existe no Windows. Fora do Windows agora usa "bottom_right_corner".
 - A conferência pelos braços descartava a mão esquerda de verdade no sinal "carro" (o Pose erra o pulso com as mãos embaixo). Agora só descarta mão muito longe dos dois braços (`DISTANCIA_MAO_PULSO = 1.5`) ou duplicada (`DISTANCIA_MAOS_DUPLICADAS`), e o lado da mão vem sempre do braço (nos vídeos, quando o MediaPipe e o braço discordavam, o braço acertou 82 de 83). No vídeo do carro: 0 mãos reais descartadas (antes 16).
 - O app não abria se o download do modelo Pose falhasse (sem internet ou sem permissão): agora segue sem os braços e avisa no log.
 - Apagar um sinal (ou começar a ensinar) durante o reconhecimento deixava o arquivo de diagnóstico aberto; duas sessões no mesmo segundo sobrescreviam o mesmo arquivo.
