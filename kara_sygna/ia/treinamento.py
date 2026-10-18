@@ -141,10 +141,10 @@ def treinar(
         :class:`ResultadoTreino`.
 
     Raises:
-        TreinoImpossivelError: Se o CSV estiver vazio ou tiver só 1 sinal.
+        TreinoImpossivelError: Se o CSV estiver vazio ou sem gravações com mãos.
     """
     if len(dados) == 0:
-        raise TreinoImpossivelError("O CSV está vazio. Ensine pelo menos dois sinais.")
+        raise TreinoImpossivelError("O CSV está vazio. Ensine pelo menos um sinal.")
     progresso("Montando as sequências de quadros...")
     dados = montar_amostras(dados)
     if len(dados) == 0:
@@ -153,11 +153,6 @@ def treinar(
             "sinal por pelo menos alguns segundos, com as mãos visíveis."
         )
     classes = dados.classes
-    if len(classes) < 2:
-        raise TreinoImpossivelError(
-            "Só há 1 sinal gravado. Grave pelo menos 2 sinais — de preferência também um "
-            "sinal 'neutro' (mão relaxada) para a IA saber quando NÃO há sinal."
-        )
 
     rodadas = len(set(dados.grupos.tolist()))
     progresso(f"{len(dados)} exemplos, {len(classes)} sinais, {rodadas} rodadas.")

@@ -14,14 +14,16 @@ from kara_sygna.aplicacao.erros import (
     SemDadosError,
 )
 from kara_sygna.aplicacao.previsualizacao import Reproducao, completar_com_espelho
-from kara_sygna.dados.repositorio import RepositorioSinais
+from kara_sygna.dados.repositorio import TIPO_PRE, RepositorioSinais
+from kara_sygna.ia.pre_sinais import ModeloPreSinais
 from kara_sygna.visao.caracteristicas import IDX_DIR, IDX_ESQ
 from testes.conftest import quadro_falso, vetor_de_duas_maos, vetor_de_uma_mao
+from testes.test_filtro_quadros import Relogio
 from testes.test_reconhecimento import ModeloFalso
 
 
 def _quadro(rng, uma_mao=False):
-    """Vetor de quadro (214 valores) com uma ou duas mãos."""
+    """Vetor de quadro (223 valores) com uma ou duas mãos."""
     return quadro_falso(vetor_de_uma_mao(rng) if uma_mao else vetor_de_duas_maos(rng))
 
 
@@ -63,7 +65,7 @@ def test_ensino_grava_os_quadros_em_sequencia(ctrl, rng):
     assert ctrl.total_gravado == 4 and r1.nivel is Nivel.ENSINO
     assert r2.texto_video == "ENSINANDO: oi (2)"
     assert "Mostre as mãos" in r3.status and "Mostre as mãos" not in r2.status
-    assert ctrl.parar().startswith("Ensino de “oi” parado: 4")
+    assert ctrl.parar().startswith("“oi”: 4 quadros gravados")
     assert ctrl.repositorio.contagem_por_sinal() == {"oi": 4}
     assert ctrl.repositorio.carregar().X.shape[0] == 4
 
@@ -248,13 +250,30 @@ def test_treinar_sem_dados(ctrl):
 def test_criar_reproducao(ctrl, rng):
     with pytest.raises(SemDadosError):
         ctrl.repositorio.garantir_arquivo() or ctrl.criar_reproducao("x")
+    relogio = Relogio()
+    ctrl._relogio = relogio
     ctrl.iniciar_ensino("a")
     ctrl.processar_quadro(_quadro(rng, uma_mao=True))
-    ctrl.processar_quadro(quadro_falso(None))  # sem mão: fica fora da reprodução
+    relogio.agora = 2.0
+    ctrl.processar_quadro(quadro_falso(None))  # sem mão por muito tempo: fica fora
+    relogio.agora = 4.0
     ctrl.processar_quadro(_quadro(rng))
     ctrl.parar()
     reproducao = ctrl.criar_reproducao("a")
     assert len(reproducao.vetores) == 2
+
+
+def test_ensino_preenche_a_mao_que_sumiu_por_pouco_tempo(ctrl, rng):
+    relogio = Relogio()
+    ctrl._relogio = relogio
+    ctrl.iniciar_ensino("a")
+    for t, quadro in enumerate(
+        [_quadro(rng), quadro_falso(None), quadro_falso(None), _quadro(rng)]
+    ):
+        relogio.agora = t / 30
+        ctrl.processar_quadro(quadro)
+    ctrl.parar()
+    assert len(ctrl.criar_reproducao("a").vetores) == 4  # os 2 do meio preenchidos
 
 
 def test_completar_com_espelho_so_muda_quadros_de_uma_mao(rng):
@@ -302,3 +321,157 @@ def test_modo_mudanca_confirma_sinal_parado(ctrl, rng, monkeypatch):
     parado = _quadro(rng)
     confirmados = [ctrl.processar_quadro(parado).sinal_confirmado for _ in range(10)]
     assert confirmados.count("a") == 1
+
+
+# ---------------------------------------------------------------- pré-sinal
+
+
+def test_ensino_com_pre_sinal_grava_as_duas_etapas(ctrl, rng):
+    ctrl.iniciar_ensino("S", TIPO_PRE)
+    for _ in range(3):
+        ctrl.processar_quadro(_quadro(rng, uma_mao=True))
+    assert (
+        "PRE-SINAL: S" in ctrl.processar_quadro(_quadro(rng, uma_mao=True)).texto_video
+    )
+    assert ctrl.parar().startswith("Pré-sinal “S”: 4 quadros")
+    ctrl.iniciar_ensino("Carro", pre_sinal="S")
+    assert "SINAL: carro" in ctrl.processar_quadro(_quadro(rng)).texto_video
+    ctrl.parar()
+
+    sinais = ctrl.listar_sinais()
+    assert [(s.chave, s.exemplos, s.pre_sinal) for s in sinais] == [
+        ("pre:S", 4, ""),
+        ("carro", 1, "S"),
+    ]
+    assert ctrl.criar_reproducao("pre:S").legenda.startswith("S ")
+    assert "Pré-sinal" in ctrl.apagar_sinal("pre:S")
+    assert [s.chave for s in ctrl.listar_sinais()] == ["carro"]
+
+
+def test_pre_sinal_vazio_e_recusado(ctrl):
+    with pytest.raises(PalavraInvalidaError, match="pré-sinal"):
+        ctrl.iniciar_ensino("  ", TIPO_PRE)
+
+
+class _ClassificadorFalso:
+    """IA de pré-sinais falsa: diz "S" enquanto ``mostrando`` for True."""
+
+    classes_ = np.array(["", "S"])
+
+    def __init__(self):
+        self.mostrando = False
+
+    def predict_proba(self, X):
+        linha = [0.0, 1.0] if self.mostrando else [1.0, 0.0]
+        return np.tile(linha, (len(X), 1))
+
+
+def _reconhecer_com_pre(ctrl, rng):
+    """Reconhecimento com sinal "a" (sempre 90%) que exige o pré-sinal S."""
+    _preparar_modelo(ctrl, rng)
+    ctrl.iniciar_reconhecimento(espera_sinal_s=3)
+    classificador = _ClassificadorFalso()
+    ctrl._pre = ModeloPreSinais(classificador, {"a": "S"})
+    # 75%: passa da confiança mínima, mas não da certeza para dispensar o S.
+    ctrl._modelo = ModeloFalso([0.75, 0.2, 0.05])
+    relogio = Relogio()
+    ctrl._relogio = relogio
+    return classificador, relogio
+
+
+def _confirmados(ctrl, rng, n):
+    return [ctrl.processar_quadro(_quadro(rng)).sinal_confirmado for _ in range(n)]
+
+
+def test_sinal_com_pre_sinal_so_vale_depois_do_pre_sinal(ctrl, rng):
+    classificador, _ = _reconhecer_com_pre(ctrl, rng)
+    assert not any(_confirmados(ctrl, rng, 30))  # sem o S, "a" não é permitido
+
+    classificador.mostrando = True
+    _confirmados(ctrl, rng, config.VOTOS_MINIMOS)
+    assert ctrl.pre_ativo == "S"
+    resposta = ctrl.processar_quadro(_quadro(rng))
+    assert "PRE-SINAL" not in resposta.texto_video  # não aparece na tela
+
+    classificador.mostrando = False
+    assert _confirmados(ctrl, rng, 30).count("a") == 1
+    assert ctrl.pre_ativo is None  # depois do sinal, espera outro pré-sinal
+
+
+def test_pre_sinal_expira_sem_sinal(ctrl, rng):
+    classificador, relogio = _reconhecer_com_pre(ctrl, rng)
+    classificador.mostrando = True
+    _confirmados(ctrl, rng, config.VOTOS_MINIMOS)
+    assert ctrl.pre_ativo == "S"
+    relogio.agora = 3.5
+    ctrl.processar_quadro(_quadro(rng))
+    assert ctrl.pre_ativo is None
+
+
+def test_diagnostico_registra_cada_quadro_e_resume(ctrl, rng, tmp_path):
+    import csv
+
+    classificador, _ = _reconhecer_com_pre(ctrl, rng)
+    assert ctrl.diagnostico is not None
+    caminho = ctrl.diagnostico.caminho
+    _confirmados(ctrl, rng, config.QUADROS_POR_JANELA + 2)  # sem o S: não permitido
+    classificador.mostrando = True
+    _confirmados(ctrl, rng, config.VOTOS_MINIMOS)
+    classificador.mostrando = False
+    _confirmados(ctrl, rng, 20)
+    resumo = ctrl.diagnostico.fechar()
+    ctrl.diagnostico = None
+    with open(caminho, encoding="utf-8") as arquivo:
+        linhas = list(csv.DictReader(arquivo))
+    assert len(linhas) == config.QUADROS_POR_JANELA + 2 + config.VOTOS_MINIMOS + 20
+    assert linhas[0]["motivo"] == "preparando"  # a janela ainda não encheu
+    linha = linhas[config.QUADROS_POR_JANELA]
+    assert linha["motivo"] == "falta_pre" and linha["top1"] == "a"
+    assert linha["top1_pct"] == "75" and linha["mao_dir"] == "1"
+    assert any(linha["escrito"] == "a" for linha in linhas)
+    assert "Escrito: a×1" in resumo and "Pré-sinais vistos: S×1" in resumo
+    assert "falta_pre" in resumo
+
+
+def test_sinal_com_muita_certeza_vale_sem_o_pre_sinal(ctrl, rng):
+    _reconhecer_com_pre(ctrl, rng)
+    ctrl._modelo = ModeloFalso([0.9, 0.05, 0.05])  # 90%: passa dos 85%
+    confirmados = _confirmados(ctrl, rng, 30)
+    assert confirmados.count("a") == 1 and ctrl.pre_ativo is None
+
+
+def test_pre_sinal_visto_nao_bloqueia_outro_sinal(ctrl, rng):
+    """Depois do S (carro), a casa (pré-sinal B) sai na hora, sem esperar."""
+    classificador, _ = _reconhecer_com_pre(ctrl, rng)
+    ctrl._pre = ModeloPreSinais(classificador, {"a": "S", "b": "B"})
+    classificador.mostrando = True
+    _confirmados(ctrl, rng, config.VOTOS_MINIMOS)
+    assert ctrl.pre_ativo == "S"
+    classificador.mostrando = False
+    ctrl._modelo = ModeloFalso([0.05, 0.9, 0.05])  # agora a IA acha "b" com 90%
+    assert _confirmados(ctrl, rng, 20).count("b") == 1
+
+
+def test_pre_sinal_visto_baixa_o_limite_so_dos_sinais_dele(ctrl, rng):
+    classificador, _ = _reconhecer_com_pre(ctrl, rng)
+    ctrl._pre = ModeloPreSinais(classificador, {"a": "S", "b": "B"})
+    assert ctrl._limite_do_sinal("a") == config.CONFIANCA_SEM_PRE_SINAL
+    assert ctrl._limite_do_sinal("c") == config.CONFIANCA_MINIMA  # sem pré-sinal
+    classificador.mostrando = True
+    _confirmados(ctrl, rng, config.VOTOS_MINIMOS)
+    assert ctrl._limite_do_sinal("a") == config.CONFIANCA_MINIMA
+    assert ctrl._limite_do_sinal("b") == config.CONFIANCA_SEM_PRE_SINAL
+
+
+def test_pre_sinal_nao_diferencia_maiuscula(ctrl, rng):
+    ctrl.iniciar_ensino("s", TIPO_PRE)
+    ctrl.processar_quadro(_quadro(rng, uma_mao=True))
+    ctrl.parar()
+    ctrl.iniciar_ensino(" S ", TIPO_PRE)
+    ctrl.processar_quadro(_quadro(rng, uma_mao=True))
+    ctrl.parar()
+    ctrl.iniciar_ensino("carro", pre_sinal="s")
+    ctrl.processar_quadro(_quadro(rng))
+    ctrl.parar()
+    assert ctrl.repositorio.contagem_por_sinal(TIPO_PRE) == {"S": 2}
+    assert ctrl.repositorio.pre_sinais_dos_sinais() == {"carro": "S"}

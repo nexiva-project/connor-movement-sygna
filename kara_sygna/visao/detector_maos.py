@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 from kara_sygna import config
-from kara_sygna.visao.caracteristicas import NOMES_LADO, slot_do_rotulo
+from kara_sygna.visao.caracteristicas import NOMES_LADO, indices_dos_slots
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +88,17 @@ class DetectorMaos:
         )
         espessura_texto = max(1, min(8, int(estilo.get("maos_espessura_texto", 2))))
 
-        for landmarks, info in zip(listas, lateralidades):
-            try:
-                lado = slot_do_rotulo(info.classification[0].label)
-            except (AttributeError, IndexError, TypeError):
-                lado = "esquerda"
-
-            sufixo = "esquerda" if lado in ("esquerda", "left", 0) else "direita"
+        # O mesmo lado ("esq"/"dir") que a IA usa para cada mão.
+        lado_do_indice = {
+            indice: lado
+            for lado, indice in indices_dos_slots(resultado).items()
+            if indice is not None
+        }
+        for indice, landmarks in enumerate(listas):
+            lado = lado_do_indice.get(indice)
+            if lado is None:
+                continue
+            sufixo = "esquerda" if lado == "esq" else "direita"
 
             cor_linha = _cor_bgr(
                 estilo.get(f"maos_cor_linha_{sufixo}"),

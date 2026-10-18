@@ -62,3 +62,18 @@ def test_sem_nenhuma_mao_lembra_as_duas_e_zero_desliga(rng):
     desligada.aplicar(resultado_falso((esq, "Left")))
     relogio.agora = 0.15
     assert _n(desligada.aplicar(resultado_falso())) == 0
+
+
+def test_mao_lembrada_mantem_os_world_landmarks(rng):
+    relogio = Relogio()
+    memoria = _memoria(relogio)
+    esq, dir_ = mao_falsa(rng, -0.3), mao_falsa(rng, 0.3)
+    mundo_esq, mundo_dir = mao_falsa(rng), mao_falsa(rng)
+    primeiro = resultado_falso((esq, "Left"), (dir_, "Right"))
+    primeiro.multi_hand_world_landmarks = [mundo_esq, mundo_dir]
+    memoria.aplicar(primeiro)
+    relogio.agora = 0.1
+    segundo = resultado_falso((esq, "Left"))
+    segundo.multi_hand_world_landmarks = [mundo_esq]
+    resultado = memoria.aplicar(segundo)
+    assert resultado.multi_hand_world_landmarks == [mundo_esq, mundo_dir]

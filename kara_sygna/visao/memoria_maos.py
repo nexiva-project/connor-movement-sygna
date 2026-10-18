@@ -25,7 +25,9 @@ DISTANCIA_MINIMA = 0.08
 class _MaoVista:
     landmarks: Any
     lateralidade: Any
+    mundo: Any
     momento: float
+    lado: str | None = None
 
     @property
     def pulso(self) -> tuple[float, float]:
@@ -74,15 +76,21 @@ class MemoriaMaos:
 
         Returns:
             O próprio ``resultado`` se nada foi acrescentado; senão, um objeto
-            com ``multi_hand_landmarks`` e ``multi_handedness`` completos.
+            com ``multi_hand_landmarks``, ``multi_handedness`` e
+            ``multi_hand_world_landmarks`` completos.
         """
         agora = self._relogio()
         listas = list(getattr(resultado, "multi_hand_landmarks", None) or [])
         lados = list(getattr(resultado, "multi_handedness", None) or [])
         lados += [None] * (len(listas) - len(lados))
+        mundos = list(getattr(resultado, "multi_hand_world_landmarks", None) or [])
+        mundos += [None] * (len(listas) - len(mundos))
+        # Lado de cada mão, quando os braços já decidiram (maos_pelo_corpo).
+        slots = list(getattr(resultado, "lados", None) or [])
+        slots += [None] * (len(listas) - len(slots))
         atuais = [
-            _MaoVista(lm, lado, agora)
-            for lm, lado in zip(listas, lados)
+            _MaoVista(lm, lado, mundo, agora, slot)
+            for lm, lado, mundo, slot in zip(listas, lados, mundos, slots, strict=True)
             if len(getattr(lm, "landmark", [])) >= 21
         ]
 
@@ -94,10 +102,12 @@ class MemoriaMaos:
                 break
             mais_perto = min(restantes, key=lambda v: _distancia(v.pulso, atual.pulso))
             restantes.remove(mais_perto)
+        lados_atuais = {a.lado for a in atuais if a.lado}
         restantes = [
             v
             for v in restantes
             if all(_distancia(v.pulso, a.pulso) >= DISTANCIA_MINIMA for a in atuais)
+            and (v.lado is None or v.lado not in lados_atuais)
         ][: max(0, self.max_maos - len(atuais))]
 
         self._vistas = atuais + restantes
@@ -108,4 +118,6 @@ class MemoriaMaos:
         return SimpleNamespace(
             multi_hand_landmarks=[v.landmarks for v in todas],
             multi_handedness=[v.lateralidade for v in todas],
+            multi_hand_world_landmarks=[v.mundo for v in todas],
+            lados=[v.lado for v in todas],
         )

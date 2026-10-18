@@ -9,7 +9,7 @@ from typing import Any
 
 import joblib
 
-from kara_sygna.ia.sequencia import TOTAL_FEATURES_JANELA, nomes_features_janela
+from kara_sygna.ia.sequencia import nomes_features_janela, total_features_janela
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +48,9 @@ def validar_modelo(modelo: Any) -> None:
         raise ModeloInvalidoError("O modelo carregado não oferece predict_proba().")
 
     esperado = getattr(modelo, "n_features_in_", None)
-    if esperado is not None and esperado != TOTAL_FEATURES_JANELA:
+    if esperado is not None and esperado != total_features_janela():
         raise ModeloInvalidoError(
-            f"O modelo espera {esperado} características, mas o programa gera {TOTAL_FEATURES_JANELA}. "
+            f"O modelo espera {esperado} características, mas o programa gera {total_features_janela()}. "
             "Treine a IA de novo com o CSV atual."
         )
 

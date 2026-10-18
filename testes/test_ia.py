@@ -14,7 +14,7 @@ from kara_sygna.ia.modelo_io import (
     modelo_esta_atualizado,
     validar_modelo,
 )
-from kara_sygna.ia.sequencia import TOTAL_FEATURES_JANELA
+from kara_sygna.ia.sequencia import total_features_janela
 from kara_sygna.visao.quadro import TOTAL_FEATURES_QUADRO
 from testes.conftest import gravacao_falsa, vetor_de_duas_maos, vetor_de_uma_mao
 
@@ -42,10 +42,10 @@ def test_aumento_nao_cria_mao_que_nao_existia_e_mantem_o_pulso_na_origem(rng):
 
 
 def test_aumento_so_mexe_na_forma_das_maos_das_janelas(rng):
-    X = np.tile(np.arange(TOTAL_FEATURES_JANELA, dtype=float), (4, 1))
+    X = np.tile(np.arange(total_features_janela(), dtype=float), (4, 1))
     X[:, :126] = vetor_de_duas_maos(rng)
     X2, _ = expandir_treino(X, np.arange(4), 2, np.random.default_rng(0))
-    assert X2.shape == (12, TOTAL_FEATURES_JANELA)
+    assert X2.shape == (12, total_features_janela())
     assert np.array_equal(X2[:, 126:], np.tile(X[0, 126:], (12, 1)))
 
 
@@ -94,10 +94,15 @@ def test_treinar_salva_modelo_e_resumo(tmp_path, rng, config_rapida):
     assert list(modelo.classes_) == ["a", "b", "c"] and modelo.n_jobs == 1
 
 
-def test_treinar_exige_dois_sinais(tmp_path, rng, config_rapida):
-    dados = _dados_sinteticos(rng, classes=("a",))
-    with pytest.raises(treinamento.TreinoImpossivelError, match="1 sinal"):
-        treinamento.treinar(dados, tmp_path / "m.pkl")
+def test_treinar_com_um_sinal_so(tmp_path, rng, config_rapida):
+    from kara_sygna.ia.reconhecimento import prever
+
+    caminho = tmp_path / "m.pkl"
+    resultado = treinamento.treinar(_dados_sinteticos(rng, classes=("a",)), caminho)
+    assert resultado.classes == ["a"] and resultado.acuracia_validacao is None
+    modelo = carregar_modelo(caminho)
+    predicao = prever(modelo, np.zeros(modelo.n_features_in_))
+    assert predicao.sinal == "a" and predicao.aceito
 
 
 def test_treinar_com_csv_vazio(tmp_path):

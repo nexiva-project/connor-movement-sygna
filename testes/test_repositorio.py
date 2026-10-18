@@ -6,6 +6,7 @@ import pytest
 
 from kara_sygna.dados import migracao
 from kara_sygna.dados.repositorio import (
+    TIPO_PRE,
     DadosInvalidosError,
     RepositorioSinais,
     cabecalho,
@@ -30,9 +31,26 @@ def _quadros(rng, n):
 def test_cria_arquivo_com_cabecalho(repositorio):
     colunas = list(pd.read_csv(repositorio.caminho).columns)
     assert colunas == cabecalho()
-    assert colunas[:3] == ["rotulo", "rodada", "quadro"]
-    assert len(colunas) == 3 + TOTAL_FEATURES_QUADRO
+    assert colunas[:5] == ["rotulo", "rodada", "quadro", "tipo", "pre_sinal"]
+    assert colunas[5].startswith("formato_v")
+    assert len(colunas) == 6 + TOTAL_FEATURES_QUADRO
     assert repositorio.contagem_por_sinal() == {}
+
+
+def test_pre_sinais_ficam_separados_dos_sinais(repositorio, rng):
+    repositorio.anexar_quadros("S", 1, _quadros(rng, 4), tipo=TIPO_PRE)
+    repositorio.anexar_quadros("carro", 2, _quadros(rng, 3), pre_sinal="S")
+    repositorio.anexar_quadros("oi", 3, _quadros(rng, 2))
+    assert repositorio.contagem_por_sinal() == {"carro": 3, "oi": 2}
+    assert repositorio.contagem_por_sinal(TIPO_PRE) == {"S": 4}
+    assert repositorio.pre_sinais_dos_sinais() == {"carro": "S"}
+    assert len(repositorio.carregar()) == 5
+    assert repositorio.carregar(TIPO_PRE).classes == ["S"]
+    assert repositorio.exemplos_do_sinal("S", TIPO_PRE).shape == (4, 126)
+    # Apagar o pré-sinal não apaga os sinais (e vice-versa).
+    assert repositorio.apagar_sinal("S", TIPO_PRE) == 4
+    assert repositorio.contagem_por_sinal() == {"carro": 3, "oi": 2}
+    assert repositorio.pre_sinais_dos_sinais() == {"carro": "S"}
 
 
 def test_grava_um_quadro_por_linha(repositorio, rng):
@@ -140,3 +158,12 @@ def test_copia_arquivos_antigos_sem_apagar_os_originais(tmp_path):
     assert {p.name for p in copiados} == {"dados_sinais.csv", "modelo_sinais.pkl"}
     assert (raiz / "dados_sinais.csv").exists()
     assert migracao.copiar_arquivos_legados(raiz, destino) == []  # não sobrescreve
+
+
+def test_pre_sinal_antigo_em_minuscula_junta_com_maiuscula(repositorio, rng):
+    repositorio.anexar_quadros("s", 1, _quadros(rng, 2), tipo=TIPO_PRE)
+    repositorio.anexar_quadros("S", 2, _quadros(rng, 3), tipo=TIPO_PRE)
+    repositorio.anexar_quadros("carro", 3, _quadros(rng, 1), pre_sinal="s")
+    assert repositorio.contagem_por_sinal(TIPO_PRE) == {"S": 5}
+    assert repositorio.pre_sinais_dos_sinais() == {"carro": "S"}
+    assert repositorio.apagar_sinal("s", TIPO_PRE) == 5

@@ -77,3 +77,10 @@ def test_valores_padrao_vem_da_configuracao():
         config.VOTOS_MINIMOS,
         config.QUADROS_PARA_LIBERAR,
     )
+
+
+def test_permitidos_zera_os_outros_sem_redividir():
+    modelo = ModeloFalso([0.8, 0.15, 0.05])
+    assert prever(modelo, np.zeros(126), {"a"}).aceito
+    p = prever(modelo, np.zeros(126), {"b", "c"})
+    assert p.sinal == "b" and p.confianca == pytest.approx(0.15) and not p.aceito

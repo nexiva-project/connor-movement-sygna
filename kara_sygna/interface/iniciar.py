@@ -37,6 +37,7 @@ def _liberar_recursos(
     camera: Any = None,
     detector_maos: Any = None,
     detector_rosto: Any = None,
+    detector_corpo: Any = None,
 ) -> None:
     """Libera os recursos criados durante a inicialização."""
     if camera is not None:
@@ -57,6 +58,12 @@ def _liberar_recursos(
         except Exception:
             logger.exception("Erro ao fechar o detector de mãos")
 
+    if detector_corpo is not None:
+        try:
+            detector_corpo.fechar()
+        except Exception:
+            logger.exception("Erro ao fechar o detector do corpo")
+
 
 def _carregar_em_segundo_plano(
     eventos: queue.Queue[tuple[str, Any]],
@@ -66,6 +73,7 @@ def _carregar_em_segundo_plano(
     camera = None
     detector_maos = None
     detector_rosto = None
+    detector_corpo = None
 
     try:
         eventos.put(("etapa", "Preparando o ambiente..."))
@@ -83,6 +91,7 @@ def _carregar_em_segundo_plano(
             CameraIndisponivelError,
             abrir_camera,
         )
+        from kara_sygna.visao.detector_corpo import DetectorCorpo
         from kara_sygna.visao.detector_maos import DetectorMaos
         from kara_sygna.visao.detector_rosto import DetectorRosto
 
@@ -95,11 +104,13 @@ def _carregar_em_segundo_plano(
             return
 
         detector_rosto = DetectorRosto()
+        detector_corpo = DetectorCorpo()
 
         if cancelamento.is_set():
             _liberar_recursos(
                 detector_maos=detector_maos,
                 detector_rosto=detector_rosto,
+                detector_corpo=detector_corpo,
             )
             return
 
@@ -111,6 +122,7 @@ def _carregar_em_segundo_plano(
                 camera=camera,
                 detector_maos=detector_maos,
                 detector_rosto=detector_rosto,
+                detector_corpo=detector_corpo,
             )
             return
 
@@ -126,6 +138,7 @@ def _carregar_em_segundo_plano(
                 camera=camera,
                 detector_maos=detector_maos,
                 detector_rosto=detector_rosto,
+                detector_corpo=detector_corpo,
             )
             return
 
@@ -138,6 +151,7 @@ def _carregar_em_segundo_plano(
                     camera,
                     detector_maos,
                     detector_rosto,
+                    detector_corpo,
                     JanelaPrincipal,
                 ),
             )
@@ -150,6 +164,7 @@ def _carregar_em_segundo_plano(
             camera=camera,
             detector_maos=detector_maos,
             detector_rosto=detector_rosto,
+            detector_corpo=detector_corpo,
         )
 
         if not cancelamento.is_set():
@@ -418,11 +433,12 @@ def executar() -> int:
                 break
 
             if tipo == "pronto":
-                _, camera, detector_maos, detector_rosto, _ = dados
+                _, camera, detector_maos, detector_rosto, detector_corpo, _ = dados
                 _liberar_recursos(
                     camera=camera,
                     detector_maos=detector_maos,
                     detector_rosto=detector_rosto,
+                    detector_corpo=detector_corpo,
                 )
 
         try:
@@ -491,6 +507,7 @@ def executar() -> int:
                         camera,
                         detector_maos,
                         detector_rosto,
+                        detector_corpo,
                         classe_janela,
                     ) = dados
 
@@ -512,6 +529,7 @@ def executar() -> int:
                             camera,
                             detector_maos,
                             detector_rosto,
+                            detector_corpo,
                         )
                         iniciado = True
 
@@ -527,6 +545,7 @@ def executar() -> int:
                             camera=camera,
                             detector_maos=detector_maos,
                             detector_rosto=detector_rosto,
+                            detector_corpo=detector_corpo,
                         )
                         iniciado = False
                         messagebox.showerror(

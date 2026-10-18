@@ -33,6 +33,14 @@ def resultado_falso(*maos):
     )
 
 
+@pytest.fixture(autouse=True)
+def diagnostico_em_pasta_temporaria(tmp_path, monkeypatch):
+    """Os arquivos de diagnóstico dos testes não vão para a pasta real."""
+    from kara_sygna import config
+
+    monkeypatch.setattr(config, "PASTA_DIAGNOSTICO", tmp_path / "diagnostico")
+
+
 @pytest.fixture
 def rng():
     """Gerador aleatório com semente fixa."""
@@ -58,17 +66,23 @@ def quadro_falso(
     maos: np.ndarray | None = None,
     posicao_dir: tuple[float, float] = (0.0, 0.0),
     rosto: bool = True,
+    corpo: bool = True,
 ) -> np.ndarray:
-    """Vetor de um quadro (214 valores) com a forma das mãos e a posição da direita.
+    """Vetor de um quadro (223 valores) com a forma das mãos e a posição da direita.
 
     Args:
         maos: Os 126 valores da forma das mãos (``None`` = sem mãos).
-        posicao_dir: Posição ``(x, y)`` do pulso direito em relação ao nariz.
+        posicao_dir: Posição ``(x, y)`` do pulso direito. Vale tanto para a mão
+            (em relação ao nariz) quanto para o braço do Pose (em relação aos
+            ombros), para os testes do movimento ficarem simples.
         rosto: Se o rosto foi encontrado.
+        corpo: Se o corpo (braços) foi encontrado.
     """
     from kara_sygna.visao.quadro import (
+        COLUNA_CORPO_PRESENTE,
         COLUNA_ROSTO_PRESENTE,
         COLUNAS_POSICAO,
+        COLUNAS_PULSO_BRACO,
         IDX_MAOS,
         TOTAL_FEATURES_QUADRO,
     )
@@ -80,6 +94,9 @@ def quadro_falso(
     if rosto and maos is not None:
         col_x, col_y, col_escala = COLUNAS_POSICAO["dir"]
         vetor[[col_x, col_y, col_escala]] = (*posicao_dir, 0.5)
+    if corpo:
+        vetor[COLUNA_CORPO_PRESENTE] = 1.0
+        vetor[list(COLUNAS_PULSO_BRACO["dir"])] = posicao_dir
     return vetor
 
 

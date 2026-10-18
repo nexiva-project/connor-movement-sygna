@@ -44,7 +44,8 @@ def guardar_formato_antigo(
 
     Args:
         caminho_csv: CSV a verificar.
-        caminho_modelo: Modelo ``.pkl``; o resumo ``.json`` ao lado também vai.
+        caminho_modelo: Modelo ``.pkl``; o resumo ``.json`` e a IA de
+            pré-sinais (``*_pre.pkl``) ao lado também vão.
 
     Returns:
         Caminho do backup do CSV, ou ``None`` se nada precisou mudar (arquivo
@@ -59,7 +60,8 @@ def guardar_formato_antigo(
     momento = datetime.now()
     backup = _nome_do_backup(caminho_csv, momento)
     os.replace(caminho_csv, backup)
-    for arquivo in (caminho_modelo, caminho_modelo.with_suffix(".json")):
+    pre = caminho_modelo.with_name(f"{caminho_modelo.stem}_pre{caminho_modelo.suffix}")
+    for arquivo in (caminho_modelo, caminho_modelo.with_suffix(".json"), pre):
         if arquivo.exists():
             os.replace(arquivo, _nome_do_backup(arquivo, momento))
 

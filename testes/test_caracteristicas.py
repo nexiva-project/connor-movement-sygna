@@ -23,8 +23,8 @@ def test_sem_maos_gera_vetor_zerado(rng):
     assert vetor.shape == (126,) and c.eh_vetor_zerado(vetor)
 
 
-@pytest.mark.parametrize("rotulo, slot", [("Left", "dir"), ("Right", "esq")])
-def test_uma_mao_vai_para_o_slot_da_lateralidade_invertida(rng, rotulo, slot):
+@pytest.mark.parametrize("rotulo, slot", [("Left", "esq"), ("Right", "dir")])
+def test_uma_mao_vai_para_o_slot_da_sua_lateralidade(rng, rotulo, slot):
     vetor = c.montar_vetor_duas_maos(resultado_falso((mao_falsa(rng), rotulo)))
     esquerda, direita = c.dividir_maos(vetor)
     assert c.quantidade_de_maos(vetor) == 1

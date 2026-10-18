@@ -6,6 +6,7 @@ import copy
 import json
 import logging
 import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tkinter import colorchooser, messagebox, scrolledtext, simpledialog, ttk
 
@@ -20,6 +21,7 @@ from kara_sygna.aplicacao.erros import (
     PalavraInvalidaError,
     SemDadosError,
 )
+from kara_sygna.aplicacao.etapas import Etapa, montar_etapas
 from kara_sygna.aplicacao.temporizador import (
     Evento,
     Fase,
@@ -40,10 +42,13 @@ from kara_sygna.interface.janela_log import JanelaLog
 from kara_sygna.interface.janela_previsualizacao import JanelaPrevisualizacao
 from kara_sygna.interface.janela_sinais import JanelaSinais
 from kara_sygna.interface.tarefas import ExecutorTk
+from kara_sygna.visao.detector_corpo import DetectorCorpo
 from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
 from kara_sygna.visao.detector_rosto import DetectorRosto, ResultadoRosto
+from kara_sygna.visao.maos_pelo_corpo import conferir_maos
 from kara_sygna.visao.memoria_maos import MemoriaMaos
 from kara_sygna.visao.quadro import montar_vetor_quadro
+from kara_sygna.visao.realce_pele import RealcePele
 from kara_sygna.visao.suavizacao import SuavizadorPontos
 
 logger = logging.getLogger(__name__)
@@ -137,13 +142,17 @@ class JanelaPrincipal:
         camera: Camera,
         detector: DetectorMaos,
         detector_rosto: DetectorRosto,
+        detector_corpo: DetectorCorpo | None = None,
     ) -> None:
         self._raiz = raiz
         self._controlador = controlador
         self._camera = camera
         self._detector = detector
         self._detector_rosto = detector_rosto
+        self._detector_corpo = detector_corpo
+        self._executor_corpo = ThreadPoolExecutor(1, thread_name_prefix="corpo")
         self._memoria_maos = MemoriaMaos()
+        self._realce_pele = RealcePele()
 
         self._arquivo_config_suavizacao = Path.home() / ".kara_sygna_suavizacao.json"
 
@@ -242,7 +251,12 @@ class JanelaPrincipal:
         # Segundos de gravação (campo abaixo da câmera); vazio = até parar.
         self._duracao = tk.StringVar(master=raiz)
         self._temporizador = TemporizadorEnsino()
-        self._palavra_agendada = ""
+        # Etapas do ensino que ainda faltam: (tipo, nome, pré-sinal, segundos).
+        # Com pré-sinal são duas: primeiro o pré-sinal, depois o sinal.
+        self._etapas: list[Etapa] = []
+        self._etapa_atual: Etapa | None = None
+        self._pre_ligado = tk.BooleanVar(master=raiz, value=False)
+        self._pre_nome = tk.StringVar(master=raiz)
         self._sinal_atual = tk.StringVar(
             master=raiz,
             value="AGUARDANDO SINAL",
@@ -1389,6 +1403,49 @@ class JanelaPrincipal:
         )
         campo.pack(fill="x", padx=12, pady=(5, 10), ipady=7)
 
+        # Pré-sinal: forma de mão (ex.: "S") gravada antes do sinal.
+        linha_pre = tk.Frame(ensinar, bg="#111B2D")
+        linha_pre.pack(fill="x", padx=12, pady=(0, 10))
+        campo_pre = tk.Entry(
+            linha_pre,
+            textvariable=self._pre_nome,
+            width=8,
+            justify="center",
+            font=("Arial", 11),
+            bg="#080D18",
+            fg="#F1F7FF",
+            disabledbackground="#0B1220",
+            insertbackground="#00D7FF",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#30415C",
+            highlightcolor="#00D7FF",
+            state="disabled",
+        )
+
+        def alternar_pre(*_args) -> None:
+            ligado = self._pre_ligado.get()
+            campo_pre.configure(state="normal" if ligado else "disabled")
+            if ligado:
+                campo_pre.focus_set()
+
+        # trace: o campo acompanha o botão mesmo quando o valor muda pelo código.
+        self._pre_ligado.trace_add("write", alternar_pre)
+
+        tk.Checkbutton(
+            linha_pre,
+            text="Pré-sinal",
+            variable=self._pre_ligado,
+            bg="#111B2D",
+            fg="#DCE8FA",
+            selectcolor="#080D18",
+            activebackground="#111B2D",
+            activeforeground="#F1F7FF",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+        ).pack(side="left")
+        campo_pre.pack(side="left", padx=(8, 0), ipady=4)
+
         self._botao_estilizado(
             ensinar,
             "COMEÇAR A ENSINAR (ENTER)",
@@ -1589,14 +1646,19 @@ class JanelaPrincipal:
         return self._executor.ocupado
 
     def _iniciar_ensino(self) -> None:
-        """Começa a contagem; a gravação começa quando ela acabar."""
+        """Monta as etapas (pré-sinal, se ligado, e sinal) e começa a primeira."""
         if self._bloqueado_por_treino():
             return
         palavra = self._palavra.get().strip()
+        pre = self._pre_nome.get().strip() if self._pre_ligado.get() else ""
         try:
             if not palavra:
                 raise PalavraInvalidaError(
                     "Escreva a palavra do sinal antes de começar."
+                )
+            if self._pre_ligado.get() and not pre:
+                raise PalavraInvalidaError(
+                    "Escreva o pré-sinal (ex.: S) ou desligue o botão Pré-sinal."
                 )
             duracao = ler_duracao(self._duracao.get())
         except ErroAplicacao as erro:
@@ -1604,21 +1666,42 @@ class JanelaPrincipal:
             return
 
         self._parar()  # para o reconhecimento ou um ensino em andamento
-        self._palavra_agendada = palavra
-        self._temporizador.iniciar(duracao)
-        tempo = "até parar" if duracao is None else f"por {duracao:g} s"
+        # Pré-sinal uma vez e o sinal em cada ritmo (veja aplicacao/etapas.py).
+        self._etapas = montar_etapas(palavra, pre, duracao)
+        self._proxima_etapa()
+
+    def _proxima_etapa(self) -> None:
+        """Começa a contagem da próxima etapa do ensino."""
+        self._etapa_atual = etapa = self._etapas.pop(0)
+        self._temporizador.iniciar(etapa.duracao)
+        tempo = "até parar" if etapa.duracao is None else f"por {etapa.duracao:g} s"
         self._status.set(
-            f"Prepare “{palavra}”: a gravação começa em "
+            f"Prepare “{etapa.legenda}”: a gravação começa em "
             f"{config.SEGUNDOS_CONTAGEM_ENSINO} s e vai {tempo}."
         )
 
     def _comecar_gravacao(self) -> None:
         """Fim da contagem: começa a gravar de verdade."""
+        etapa = self._etapa_atual
         try:
-            self._status.set(self._controlador.iniciar_ensino(self._palavra_agendada))
+            self._status.set(
+                self._controlador.iniciar_ensino(
+                    etapa.nome, etapa.tipo, etapa.pre_sinal
+                )
+            )
         except ErroAplicacao as erro:
             self._temporizador.cancelar()
+            self._etapas = []
             self._tratar_erro(erro, "Não foi possível ensinar")
+
+    def _fim_da_etapa(self) -> None:
+        """O tempo da etapa acabou: passa para a próxima ou termina."""
+        if not self._etapas:
+            self._parar()
+            return
+        resumo = self._controlador.parar()  # grava a etapa que acabou
+        self._proxima_etapa()
+        self._status.set(f"{resumo}\n{self._status.get()}")
 
     def _alternar_ensino(self, _evento: tk.Event | None = None) -> str:
         """Tecla Enter: começa a ensinar ou, na contagem ou gravação, para."""
@@ -1632,12 +1715,17 @@ class JanelaPrincipal:
         if self._bloqueado_por_treino():
             return
         try:
-            self._status.set(self._controlador.iniciar_reconhecimento())
+            try:
+                espera = ler_duracao(self._duracao.get())
+            except ErroAplicacao:
+                espera = None
+            self._status.set(self._controlador.iniciar_reconhecimento(espera))
         except ErroAplicacao as erro:
             self._tratar_erro(erro, "Não foi possível reconhecer")
 
     def _parar(self) -> None:
         self._temporizador.cancelar()
+        self._etapas = []
         estava_ensinando = self._controlador.modo is Modo.ENSINANDO
         self._status.set(self._controlador.parar())
         if estava_ensinando:
@@ -1774,11 +1862,28 @@ class JanelaPrincipal:
         """Suaviza cópias para desenhar; os dados originais vão para a IA."""
         quadro_original = quadro.copy()
 
-        # Mãos que "piscaram" (quadro borrado) continuam valendo por um instante.
-        resultado_maos = self._memoria_maos.aplicar(
-            self._detector.detectar(quadro_original)
+        # O corpo roda em paralelo (outra thread), na imagem original: o realce
+        # escurece os braços e a roupa. Em paralelo, quase não custa tempo.
+        corpo_futuro = (
+            self._executor_corpo.submit(self._detector_corpo.detectar, quadro_original)
+            if self._detector_corpo is not None
+            else None
         )
+        # O rosto vem primeiro: a cor da pele dele é usada no realce das mãos.
         resultado_rosto = self._detector_rosto.detectar(quadro_original)
+        self._realce_pele.calibrar(quadro_original, resultado_rosto)
+        # O detector de mãos vê a pele clara e o resto escuro (as mãos se
+        # destacam da roupa); mãos que "piscaram" continuam valendo um instante.
+        maos_detectadas = self._detector.detectar(
+            self._realce_pele.aplicar(quadro_original)
+        )
+        resultado_corpo = corpo_futuro.result() if corpo_futuro is not None else None
+        # Só valem mãos na ponta de um braço; o lado de cada uma é o do braço.
+        altura_q, largura_q = quadro_original.shape[:2]
+        maos_detectadas = conferir_maos(
+            maos_detectadas, resultado_corpo, largura_q, altura_q
+        )
+        resultado_maos = self._memoria_maos.aplicar(maos_detectadas)
 
         # Os botões de exibição só escondem o desenho.
         # A detecção e a IA continuam usando os resultados originais.
@@ -1854,11 +1959,21 @@ class JanelaPrincipal:
         if evento is Evento.COMECAR:
             self._comecar_gravacao()
         elif evento is Evento.PARAR:
-            self._parar()
+            self._fim_da_etapa()
 
         # A IA continua recebendo o resultado original, não o visual suavizado.
         altura, largura = quadro_original.shape[:2]
-        vetor = montar_vetor_quadro(resultado_maos, resultado_rosto, largura, altura)
+        # No ensino a IA recebe só as mãos vistas de verdade: os buracos são
+        # preenchidos depois, entre antes e depois (veja preenchimento.py).
+        # Ao vivo vale a memória (a mão congelada por um instante).
+        ensinando = self._controlador.modo is Modo.ENSINANDO
+        vetor = montar_vetor_quadro(
+            maos_detectadas if ensinando else resultado_maos,
+            resultado_rosto,
+            largura,
+            altura,
+            resultado_corpo,
+        )
 
         try:
             resposta = self._controlador.processar_quadro(vetor)
@@ -1907,8 +2022,12 @@ class JanelaPrincipal:
     def _texto_do_temporizador(self, texto_video: str) -> str:
         """Junta a contagem ou o tempo que falta ao texto sobre a câmera."""
         restantes = self._temporizador.segundos_restantes()
-        if self._temporizador.fase is Fase.CONTAGEM:
-            return f"PREPARE: {self._palavra_agendada}  {restantes}"
+        etapa = self._etapa_atual
+        if self._temporizador.fase is Fase.CONTAGEM and etapa:
+            return f"PREPARE: {etapa.legenda_video}  {restantes}"
+        if self._temporizador.fase is Fase.GRAVANDO and etapa:
+            texto = f"{etapa.legenda_video} ({self._controlador.total_gravado})"
+            return f"{texto}  FALTAM {restantes} s" if restantes is not None else texto
         if restantes is not None and texto_video:
             return f"{texto_video}  FALTAM {restantes} s"
         return texto_video
@@ -1994,6 +2113,13 @@ class JanelaPrincipal:
             self._detector_rosto.fechar()
         except Exception:
             logger.exception("Erro ao fechar o FaceMesh")
+
+        self._executor_corpo.shutdown(wait=True)
+        if self._detector_corpo is not None:
+            try:
+                self._detector_corpo.fechar()
+            except Exception:
+                logger.exception("Erro ao fechar o detector do corpo")
 
         try:
             self._camera.liberar()

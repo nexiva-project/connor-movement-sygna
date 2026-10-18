@@ -90,10 +90,10 @@ class FiltroQuadros:
         """Diz se o quadro deve ser usado (e, se sim, lembra dele).
 
         Args:
-            vetor: Vetor de 214 valores do quadro.
+            vetor: Vetor de 223 valores do quadro.
 
         Raises:
-            ValueError: Se o vetor não tiver 214 valores.
+            ValueError: Se o vetor não tiver 223 valores.
         """
         atual = np.asarray(vetor, dtype=np.float64).reshape(-1)
         if atual.size != TOTAL_FEATURES_QUADRO:
