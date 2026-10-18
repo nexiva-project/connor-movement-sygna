@@ -41,6 +41,7 @@ from kara_sygna.ia.pre_sinais import (
     ModeloPreSinais,
     caminho_modelo_pre,
     carregar_pre_sinais,
+    nomes_dos_pre_sinais,
     treinar_pre_sinais,
 )
 from kara_sygna.ia.reconhecimento import Estabilizador, prever
@@ -189,6 +190,8 @@ class ControladorSinais:
                 else "Escreva a palavra do sinal antes de começar."
             )
 
+        if self.modo is Modo.RECONHECENDO:
+            self.parar()  # fecha o diagnóstico do reconhecimento
         self.repositorio.garantir_arquivo()
         self.rotulo_atual = palavra
         self.tipo_atual = tipo
@@ -198,7 +201,7 @@ class ControladorSinais:
         self._pendentes = []
         self._lacuna = []
         self.filtro_quadros = FiltroQuadros()  # lê o modo atual do config
-        self.qualidade = QualidadeGravacao()
+        self.qualidade = QualidadeGravacao(tipo, palavra)
         self.modo = Modo.ENSINANDO
 
         if tipo == TIPO_PRE:
@@ -399,6 +402,7 @@ class ControladorSinais:
             np.array([quadro for _, quadro, _ in pendentes]),
             np.array([momento for _, _, momento in pendentes]),
         )
+        self.qualidade.adicionar_salvos(quadros)
         if preenchidos:
             logger.info("Mãos preenchidas em %d quadros (buracos curtos).", preenchidos)
         self.repositorio.anexar_quadros(
@@ -566,7 +570,11 @@ class ControladorSinais:
         exigente = limite > config.CONFIANCA_MINIMA  # pré-sinal não visto
         if predicao.aceito:
             campos["motivo"] = "ok_sem_pre" if exigente else "ok"
-        elif exigente and predicao.confianca >= config.CONFIANCA_MINIMA:
+        elif (
+            exigente
+            and config.CONFIANCA_MINIMA <= predicao.confianca < limite
+            and predicao.margem >= config.MARGEM_MINIMA
+        ):
             campos["motivo"] = "falta_pre"
         else:
             campos["motivo"] = "incerto"
@@ -588,8 +596,9 @@ class ControladorSinais:
             self.repositorio.caminho,
         )
         conhecidos = classes_do_modelo(self.caminho_modelo) if atualizado else set()
-        pre = carregar_pre_sinais(self.caminho_modelo_pre) if atualizado else None
-        pre_conhecidos = set(pre.pre_sinais) if pre else set()
+        pre_conhecidos = (
+            set(nomes_dos_pre_sinais(self.caminho_modelo_pre)) if atualizado else set()
+        )
         pre_dos_sinais = self.repositorio.pre_sinais_dos_sinais()
 
         return [
@@ -605,8 +614,8 @@ class ControladorSinais:
     def apagar_sinal(self, chave: str) -> str:
         """Apaga um sinal (ou um pré-sinal, ``"pre:S"``) e remove a IA treinada."""
         palavra, tipo = _separar_chave(chave)
-        if self.modo is Modo.ENSINANDO:
-            self.parar()
+        if self.modo is not Modo.PARADO:
+            self.parar()  # grava o ensino ou fecha o diagnóstico do reconhecimento
         self.repositorio.apagar_sinal(palavra, tipo)
         remover_arquivo_se_existir(self.caminho_modelo)
         remover_arquivo_se_existir(self.caminho_modelo_pre)

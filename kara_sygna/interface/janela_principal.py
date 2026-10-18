@@ -1715,11 +1715,9 @@ class JanelaPrincipal:
         if self._bloqueado_por_treino():
             return
         try:
-            try:
-                espera = ler_duracao(self._duracao.get())
-            except ErroAplicacao:
-                espera = None
-            self._status.set(self._controlador.iniciar_reconhecimento(espera))
+            # O campo de segundos é só da gravação; a ajuda do pré-sinal usa
+            # config.SEGUNDOS_ESPERA_SINAL_PADRAO.
+            self._status.set(self._controlador.iniciar_reconhecimento())
         except ErroAplicacao as erro:
             self._tratar_erro(erro, "Não foi possível reconhecer")
 

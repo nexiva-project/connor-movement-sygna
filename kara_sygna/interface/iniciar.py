@@ -91,7 +91,7 @@ def _carregar_em_segundo_plano(
             CameraIndisponivelError,
             abrir_camera,
         )
-        from kara_sygna.visao.detector_corpo import DetectorCorpo
+        from kara_sygna.visao.detector_corpo import criar_detector_corpo
         from kara_sygna.visao.detector_maos import DetectorMaos
         from kara_sygna.visao.detector_rosto import DetectorRosto
 
@@ -104,7 +104,7 @@ def _carregar_em_segundo_plano(
             return
 
         detector_rosto = DetectorRosto()
-        detector_corpo = DetectorCorpo()
+        detector_corpo = criar_detector_corpo()
 
         if cancelamento.is_set():
             _liberar_recursos(

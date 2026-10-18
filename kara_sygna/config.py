@@ -109,8 +109,8 @@ SEGUNDOS_PRE_SINAL_PADRAO = 8
 # "carro 1/3: devagar", "carro 2/3: médio", "carro 3/3: rápido".
 # () = uma vez só, como antes.
 RITMOS_ENSINO = ("devagar", "médio", "rápido")
-# No reconhecimento, depois de ver o pré-sinal, quanto tempo esperar o sinal
-# quando o campo de segundos está vazio.
+# No reconhecimento, por quantos segundos o pré-sinal visto ajuda os sinais
+# dele (eles são aceitos com a confiança normal).
 SEGUNDOS_ESPERA_SINAL_PADRAO = 3
 
 # ---------------------------------------------------------------------------

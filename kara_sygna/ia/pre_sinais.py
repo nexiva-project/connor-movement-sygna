@@ -177,6 +177,26 @@ def treinar_pre_sinais(
     return resultado
 
 
+#: {caminho: (data de modificação, nomes)} para a lista de sinais não
+#: recarregar a IA de pré-sinais a cada atualização.
+_nomes_em_cache: dict[Path, tuple[float, list[str]]] = {}
+
+
+def nomes_dos_pre_sinais(caminho: Path) -> list[str]:
+    """Pré-sinais que a IA salva conhece (guardado até o arquivo mudar)."""
+    caminho = Path(caminho)
+    try:
+        momento = caminho.stat().st_mtime
+    except FileNotFoundError:
+        return []
+    guardado = _nomes_em_cache.get(caminho)
+    if guardado is None or guardado[0] != momento:
+        modelo = carregar_pre_sinais(caminho)
+        guardado = (momento, modelo.pre_sinais if modelo else [])
+        _nomes_em_cache[caminho] = guardado
+    return list(guardado[1])
+
+
 def carregar_pre_sinais(caminho: Path) -> ModeloPreSinais | None:
     """Carrega a IA de pré-sinais, ou ``None`` se não houver (ou não servir)."""
     caminho = Path(caminho)

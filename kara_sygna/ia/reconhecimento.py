@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, deque
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,8 +22,7 @@ class Predicao:
         confianca: Probabilidade dessa palavra (0 a 1).
         margem: Diferença para a segunda mais provável (0 a 1).
         aceito: ``True`` se confiança e margem passam dos limites.
-        probabilidades: Probabilidade de cada sinal ANTES de aplicar os
-            ``permitidos`` (para o diagnóstico).
+        probabilidades: Probabilidade de cada sinal (para o diagnóstico).
     """
 
     sinal: str
@@ -39,11 +38,7 @@ def _preparar_entrada(modelo: Any, matriz: np.ndarray):
     return pd.DataFrame(matriz, columns=nomes) if nomes is not None else matriz
 
 
-def prever(
-    modelo: Any,
-    vetor: Sequence[float],
-    permitidos: Collection[str] | None = None,
-) -> Predicao:
+def prever(modelo: Any, vetor: Sequence[float]) -> Predicao:
     """Prevê o sinal de uma janela de quadros.
 
     A IA já aprendeu as inclinações da mão no treino (aumento de dados), então
@@ -52,9 +47,6 @@ def prever(
     Args:
         modelo: Modelo com ``predict_proba`` e ``classes_``.
         vetor: Vetor de uma janela (:func:`kara_sygna.ia.sequencia.features_janela`).
-        permitidos: Se informado, só estes sinais podem ser escolhidos (os
-            outros têm a probabilidade zerada, sem redividir o resto). Usado
-            pelo pré-sinal: depois do "S", só os sinais que começam com S.
 
     Returns:
         :class:`Predicao`.
@@ -62,10 +54,6 @@ def prever(
     matriz = np.asarray(vetor, dtype=np.float64).reshape(1, -1)
     p = modelo.predict_proba(_preparar_entrada(modelo, matriz))[0]
     todas = {str(c): float(v) for c, v in zip(modelo.classes_, p, strict=True)}
-    if permitidos is not None:
-        # Sem redividir: se a IA acha que é um sinal não permitido, os outros
-        # continuam com probabilidade baixa e nada é aceito.
-        p = p * np.isin(np.asarray(modelo.classes_, dtype=str), list(permitidos))
     ordem = np.argsort(p)[::-1]
     confianca = float(p[ordem[0]])
     segundo = float(p[ordem[1]]) if len(p) > 1 else 0.0

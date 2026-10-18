@@ -46,3 +46,32 @@ def test_sem_quadros():
     assert q.avisos(0) == ["nenhuma mão foi gravada"]
     assert "nenhum quadro" in q.resumo(0)
     assert np.isfinite(q.quadros)
+
+
+def test_pre_sinal_e_neutro_nao_recebem_avisos_de_maos(rng):
+    from kara_sygna.dados.repositorio import TIPO_PRE
+
+    duas = [quadro_falso(vetor_de_duas_maos(rng)) for _ in range(10)]
+    uma = [quadro_falso(vetor_de_uma_mao(rng)) for _ in range(10)]
+    pre = QualidadeGravacao(TIPO_PRE, "S")
+    for q in duas + uma:
+        pre.adicionar(q)
+    assert pre.avisos(MUITOS) == []
+
+    neutro = QualidadeGravacao(rotulo="neutro")
+    for q in [quadro_falso(None) for _ in range(20)] + uma:
+        neutro.adicionar(q)
+    assert neutro.avisos(MUITOS) == []
+
+
+def test_segunda_mao_usa_os_quadros_ja_preenchidos(rng):
+    q = QualidadeGravacao()
+    for quadro in [quadro_falso(vetor_de_duas_maos(rng))] * 5 + [
+        quadro_falso(vetor_de_uma_mao(rng))
+    ] * 5:
+        q.adicionar(quadro)
+    assert "a segunda mão sumiu muitas vezes" in q.avisos(MUITOS)
+    # Depois do preenchimento, os quadros gravados têm as duas mãos.
+    q.adicionar_salvos(np.array([quadro_falso(vetor_de_duas_maos(rng))] * 10))
+    assert q.avisos(MUITOS) == []
+    assert "2 mãos em 100% dos quadros gravados" in q.resumo(MUITOS)

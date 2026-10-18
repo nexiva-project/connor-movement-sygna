@@ -167,3 +167,10 @@ def test_pre_sinal_antigo_em_minuscula_junta_com_maiuscula(repositorio, rng):
     assert repositorio.contagem_por_sinal(TIPO_PRE) == {"S": 5}
     assert repositorio.pre_sinais_dos_sinais() == {"carro": "S"}
     assert repositorio.apagar_sinal("s", TIPO_PRE) == 5
+
+
+def test_regravar_sem_pre_sinal_tira_o_pre_sinal_antigo(repositorio, rng):
+    repositorio.anexar_quadros("carro", 1, _quadros(rng, 2), pre_sinal="S")
+    assert repositorio.pre_sinais_dos_sinais() == {"carro": "S"}
+    repositorio.anexar_quadros("carro", 2, _quadros(rng, 2))  # sem pré-sinal
+    assert repositorio.pre_sinais_dos_sinais() == {}

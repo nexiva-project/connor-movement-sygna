@@ -30,6 +30,13 @@
 - O reconhecimento avalia cada janela uma vez. As 31 rotações testadas a cada quadro foram removidas: escolher a rotação mais confiante aumentava os falsos positivos. As inclinações continuam sendo aprendidas pelo aumento de dados no treino.
 
 ### Corrigido
+- O app não abria se o download do modelo Pose falhasse (sem internet ou sem permissão): agora segue sem os braços e avisa no log.
+- Apagar um sinal (ou começar a ensinar) durante o reconhecimento deixava o arquivo de diagnóstico aberto; duas sessões no mesmo segundo sobrescreviam o mesmo arquivo.
+- Regravar um sinal sem pré-sinal não tirava o pré-sinal antigo dele.
+- O medidor de qualidade avisava "segunda mão sumiu" no pré-sinal (uma mão) e "mãos fora" no `neutro`; agora conta as duas mãos depois do preenchimento e não reclama desses casos.
+- O diagnóstico marcava `falta_pre` quando o problema era a dúvida entre dois sinais (margem pequena).
+- O campo de segundos da gravação também mudava a ajuda do pré-sinal no reconhecimento; agora a ajuda usa `SEGUNDOS_ESPERA_SINAL_PADRAO`.
+- A lista de sinais recarregava os modelos do disco a cada atualização; `scipy` entrou no `requirements.txt`.
 - O pré-sinal "s" e o "S" viravam dois pré-sinais diferentes (os exemplos se dividiam). Agora o nome do pré-sinal não diferencia maiúscula de minúscula, e os já gravados se juntam sozinhos.
 - "Mão fantasma": aparecia uma segunda mão perto da mão de verdade (no `neutro` só com a esquerda, uma "direita" em 27 de 69 quadros). Agora cada mão é conferida pelos braços do Pose: só vale a mão perto do pulso de um braço (`config.DISTANCIA_MAO_PULSO`), cada braço fica com uma mão e o lado da mão é o lado do braço. No vídeo do "carro", com as duas mãos reais, só 8 de 396 mãos foram descartadas.
 - A mão direita aparecia como "esquerda" (desenho, dados e diagnóstico): `INVERTER_LATERALIDADE` agora é `False`, porque o MediaPipe já espera a imagem espelhada. O CSV ganhou a coluna `formato_v2` e o anterior vai para o backup sozinho (grave os sinais de novo).

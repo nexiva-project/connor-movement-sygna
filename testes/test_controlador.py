@@ -475,3 +475,29 @@ def test_pre_sinal_nao_diferencia_maiuscula(ctrl, rng):
     ctrl.parar()
     assert ctrl.repositorio.contagem_por_sinal(TIPO_PRE) == {"S": 2}
     assert ctrl.repositorio.pre_sinais_dos_sinais() == {"carro": "S"}
+
+
+def test_apagar_sinal_durante_o_reconhecimento_fecha_o_diagnostico(ctrl, rng):
+    _preparar_modelo(ctrl, rng)
+    ctrl.iniciar_reconhecimento()
+    ctrl.processar_quadro(_quadro(rng))
+    arquivo = ctrl.diagnostico
+    ctrl.apagar_sinal("a")
+    assert ctrl.diagnostico is None and arquivo._arquivo.closed
+
+
+def test_ensinar_durante_o_reconhecimento_fecha_o_diagnostico(ctrl, rng):
+    _preparar_modelo(ctrl, rng)
+    ctrl.iniciar_reconhecimento()
+    arquivo = ctrl.diagnostico
+    ctrl.iniciar_ensino("b")
+    assert ctrl.diagnostico is None and arquivo._arquivo.closed
+    ctrl.parar()
+
+
+def test_falta_pre_so_quando_a_confianca_fica_entre_o_minimo_e_o_limite(ctrl, rng):
+    _reconhecer_com_pre(ctrl, rng)
+    # 80% mas margem pequena (80 - 70 = 10%): é dúvida, não falta de pré-sinal.
+    ctrl._modelo = ModeloFalso([0.80, 0.70, 0.0])
+    _confirmados(ctrl, rng, config.QUADROS_POR_JANELA + 2)
+    assert ctrl._diag["motivo"] == "incerto"

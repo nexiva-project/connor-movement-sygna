@@ -71,3 +71,42 @@ class DetectorCorpo:
     def __exit__(self, *_excecao) -> None:
         """Fecha o detector ao sair do bloco ``with``."""
         self.fechar()
+
+
+class SemCorpo:
+    """Substituto do :class:`DetectorCorpo` quando o Pose não pôde ser aberto.
+
+    ``detectar`` devolve ``None``: o bloco dos braços fica em zero e as mãos
+    passam sem a conferência pelos braços. O resto do app funciona.
+    """
+
+    def detectar(self, _quadro_bgr: np.ndarray) -> None:
+        """Não há corpo."""
+        return
+
+    def fechar(self) -> None:
+        """Nada a liberar."""
+
+    def __enter__(self) -> Self:
+        """Entra no bloco ``with``."""
+        return self
+
+    def __exit__(self, *_excecao) -> None:
+        """Sai do bloco ``with``."""
+
+
+def criar_detector_corpo() -> DetectorCorpo | SemCorpo:
+    """Abre o Pose; se falhar, segue sem ele (e avisa no log).
+
+    Na primeira vez, o MediaPipe baixa o modelo do Pose da internet para a
+    pasta de instalação. Sem internet, ou sem permissão de escrita nessa
+    pasta, isso falha; antes o app inteiro deixava de abrir.
+    """
+    try:
+        return DetectorCorpo()
+    except Exception:
+        logger.exception(
+            "Não foi possível abrir o detector do corpo (MediaPipe Pose). O app "
+            "continua sem os braços; confira a internet e reinicie para usá-los."
+        )
+        return SemCorpo()

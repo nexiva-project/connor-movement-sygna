@@ -19,7 +19,11 @@ from kara_sygna.aplicacao.controlador import ControladorSinais
 from kara_sygna.aplicacao.erros import ErroAplicacao
 from kara_sygna.aplicacao.inicializacao import preparar_ambiente
 from kara_sygna.camera import Camera, CameraIndisponivelError, abrir_camera
-from kara_sygna.visao.detector_corpo import DetectorCorpo
+from kara_sygna.visao.detector_corpo import (
+    DetectorCorpo,
+    SemCorpo,
+    criar_detector_corpo,
+)
 from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
 from kara_sygna.visao.detector_rosto import DetectorRosto
 from kara_sygna.visao.maos_pelo_corpo import conferir_maos
@@ -37,7 +41,7 @@ def gravar_rodada(
     camera: Camera,
     detector: DetectorMaos,
     detector_rosto: DetectorRosto,
-    detector_corpo: DetectorCorpo,
+    detector_corpo: DetectorCorpo | SemCorpo,
     controlador: ControladorSinais,
     palavra: str,
 ) -> bool:
@@ -122,7 +126,7 @@ def main() -> int:
         with (
             DetectorMaos() as detector,
             DetectorRosto() as detector_rosto,
-            DetectorCorpo() as detector_corpo,
+            criar_detector_corpo() as detector_corpo,
         ):
             while True:
                 palavra = (

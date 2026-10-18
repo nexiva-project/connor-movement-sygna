@@ -286,13 +286,12 @@ class RepositorioSinais:
         if not self.existe():
             return {}
         tabela = self._ler_tabela()
-        tabela = tabela[
-            (tabela[COLUNA_TIPO] == TIPO_SINAL) & (tabela[COLUNA_PRE_SINAL] != "")
-        ].sort_values(COLUNA_RODADA, kind="stable")
-        return {
-            str(sinal): str(pre)
-            for sinal, pre in zip(tabela[COLUNA_ROTULO], tabela[COLUNA_PRE_SINAL])
-        }
+        tabela = tabela[tabela[COLUNA_TIPO] == TIPO_SINAL].sort_values(
+            COLUNA_RODADA, kind="stable"
+        )
+        # A gravação mais recente vale, inclusive se foi SEM pré-sinal.
+        ultimo = dict(zip(tabela[COLUNA_ROTULO], tabela[COLUNA_PRE_SINAL], strict=True))
+        return {str(sinal): str(pre) for sinal, pre in ultimo.items() if pre}
 
     def contagem_por_sinal(self, tipo: str = TIPO_SINAL) -> dict[str, int]:
         """Quantos exemplos existem de cada sinal (ou pré-sinal), em ordem alfabética.

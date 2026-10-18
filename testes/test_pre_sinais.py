@@ -71,3 +71,22 @@ def test_treina_reconhece_e_salva(tmp_path, rng):
 
 def test_idx_forma_bate_com_as_maos():
     assert IDX_FORMA == {"esq": IDX_ESQ, "dir": IDX_DIR}
+
+
+def test_nomes_dos_pre_sinais_fica_guardado_ate_o_arquivo_mudar(
+    tmp_path, rng, monkeypatch
+):
+    from kara_sygna.ia import pre_sinais
+
+    forma = rng.normal(0, 1, FEATURES_POR_MAO)
+    X, y = _gravacao(rng, forma, 20, "S")
+    caminho = tmp_path / "m_pre.pkl"
+    vazio = ConjuntoDados(
+        np.empty((0, X.shape[1])), np.array([], dtype=str), np.array([])
+    )
+    treinar_pre_sinais(ConjuntoDados(X, y, np.ones(20)), vazio, {}, caminho)
+    assert pre_sinais.nomes_dos_pre_sinais(caminho) == ["S"]
+    chamadas = []
+    monkeypatch.setattr(pre_sinais, "carregar_pre_sinais", lambda c: chamadas.append(c))
+    assert pre_sinais.nomes_dos_pre_sinais(caminho) == ["S"] and not chamadas
+    assert pre_sinais.nomes_dos_pre_sinais(tmp_path / "nao_existe.pkl") == []

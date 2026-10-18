@@ -16,7 +16,9 @@ from kara_sygna.aplicacao.erros import ErroAplicacao
 from kara_sygna.aplicacao.inicializacao import preparar_ambiente
 from kara_sygna.camera import CameraIndisponivelError, abrir_camera
 from kara_sygna.ia.modelo_io import ModeloInvalidoError
-from kara_sygna.visao.detector_corpo import DetectorCorpo
+from kara_sygna.visao.detector_corpo import (
+    criar_detector_corpo,
+)
 from kara_sygna.visao.detector_maos import DetectorMaos
 from kara_sygna.visao.detector_rosto import DetectorRosto
 from kara_sygna.visao.maos_pelo_corpo import conferir_maos
@@ -54,7 +56,7 @@ def main() -> int:
         with (
             DetectorMaos() as detector,
             DetectorRosto() as detector_rosto,
-            DetectorCorpo() as detector_corpo,
+            criar_detector_corpo() as detector_corpo,
         ):
             memoria = MemoriaMaos()
             realce = RealcePele()

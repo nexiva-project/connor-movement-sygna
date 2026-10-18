@@ -91,10 +91,29 @@ def modelo_esta_atualizado(caminho_modelo: Path, caminho_csv: Path) -> bool:
     return caminho_modelo.stat().st_mtime >= caminho_csv.stat().st_mtime
 
 
+#: {caminho: (data de modificação, classes)}: a lista de sinais é atualizada
+#: depois de cada etapa do ensino, e carregar o modelo inteiro a cada vez
+#: travava a interface.
+_classes_em_cache: dict[Path, tuple[float, set[str]]] = {}
+
+
 def classes_do_modelo(caminho_modelo: Path) -> set[str]:
-    """Lista os sinais que o modelo salvo conhece (vazio se não houver modelo válido)."""
+    """Lista os sinais que o modelo salvo conhece (vazio se não houver modelo válido).
+
+    O resultado fica guardado até o arquivo do modelo mudar.
+    """
+    caminho_modelo = Path(caminho_modelo)
     try:
-        return {str(c) for c in carregar_modelo(caminho_modelo).classes_}
+        momento = caminho_modelo.stat().st_mtime
+    except FileNotFoundError:
+        return set()
+    guardado = _classes_em_cache.get(caminho_modelo)
+    if guardado is not None and guardado[0] == momento:
+        return set(guardado[1])
+    try:
+        classes = {str(c) for c in carregar_modelo(caminho_modelo).classes_}
+        _classes_em_cache[caminho_modelo] = (momento, classes)
+        return set(classes)
     except (FileNotFoundError, ModeloInvalidoError):
         return set()
     except Exception:

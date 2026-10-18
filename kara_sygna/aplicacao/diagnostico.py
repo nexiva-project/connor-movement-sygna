@@ -82,11 +82,23 @@ class DiagnosticoReconhecimento:
 
         pasta = Path(pasta) if pasta is not None else config.PASTA_DIAGNOSTICO
         pasta.mkdir(parents=True, exist_ok=True)
-        self.caminho = pasta / f"reconhecimento_{datetime.now():%Y%m%d_%H%M%S}.csv"
         self._relogio = relogio or time.monotonic
         self._inicio = self._relogio()
-        # Fica aberto durante a sessão inteira (fechado em fechar()).
-        self._arquivo = open(self.caminho, "w", newline="", encoding="utf-8")  # noqa: SIM115
+        # Nome único: duas sessões no mesmo segundo não se sobrescrevem ("x"
+        # nunca abre um arquivo que já existe). Fica aberto até fechar().
+        momento = f"{datetime.now():%Y%m%d_%H%M%S}"
+        for numero in range(1000):
+            sufixo = f"_{numero}" if numero else ""
+            self.caminho = pasta / f"reconhecimento_{momento}{sufixo}.csv"
+            try:
+                self._arquivo = open(  # noqa: SIM115
+                    self.caminho, "x", newline="", encoding="utf-8"
+                )
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise FileExistsError(f"Sem nome livre para o diagnóstico em {pasta}.")
         self._escritor = csv.DictWriter(self._arquivo, fieldnames=CAMPOS)
         self._escritor.writeheader()
         self._linhas = 0
