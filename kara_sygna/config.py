@@ -201,9 +201,12 @@ SEGUNDOS_CONTAGEM_ENSINO = 3
 INTERVALO_QUADRO_MS = 15
 # Quantos detectores de MÃOS analisam quadros ao mesmo tempo, em revezamento
 # (kara_sygna.visao.revezamento); rosto e braços ficam numa thread só. 1 = um
-# quadro por vez, como antes (~15 qps ao vivo). 2 (laboratório, 19/10/2026):
-# ~30 qps, e as trocas rápidas carro→casa passaram a ser todas reconhecidas.
-REVEZAMENTO_DETECTORES = 2
+# quadro por vez, como antes (~15 qps ao vivo). Laboratório, 19/10/2026, com
+# câmera falsa de 30 qps: 2 detectores = 25 qps, 3 = 30 qps (o limite da
+# câmera); nos vídeos de teste, 2, 3 e 4 tiveram a mesma qualidade de um
+# detector vendo todos os quadros, e as trocas rápidas carro→casa passaram a
+# ser todas reconhecidas.
+REVEZAMENTO_DETECTORES = 3
 # Tamanho da janela principal ao abrir (menor, se a tela for menor).
 LARGURA_JANELA_PADRAO = 1024
 ALTURA_JANELA_PADRAO = 768
