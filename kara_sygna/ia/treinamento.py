@@ -102,6 +102,13 @@ def avaliar(
 
     ficam = np.isin(dados.y, avaliaveis)
     X, y, grupos = dados.X[ficam], dados.y[ficam], dados.grupos[ficam]
+    # As cópias com a mão apagada (máscara) só treinam: a nota é medida nas
+    # janelas gravadas de verdade, como antes da máscara.
+    mascarada = (
+        dados.mascarada[ficam]
+        if dados.mascarada is not None
+        else np.zeros(len(y), dtype=bool)
+    )
     dobras = min(config.MAX_DOBRAS_VALIDACAO, min(rodadas[c] for c in avaliaveis))
 
     validador = StratifiedGroupKFold(
@@ -111,11 +118,12 @@ def avaliar(
     for numero, (idx_treino, idx_teste) in enumerate(validador.split(X, y, grupos), 1):
         progresso(f"Validando {numero}/{dobras}...")
         modelo = _ajustar(X[idx_treino], y[idx_treino])
+        idx_teste = idx_teste[~mascarada[idx_teste]]
         previstos[idx_teste] = modelo.predict(
             pd.DataFrame(X[idx_teste], columns=nomes_features_janela())
         )
 
-    previstos = previstos.astype(str)
+    y, previstos = y[~mascarada], previstos[~mascarada].astype(str)
     relatorio = classification_report(y, previstos, zero_division=0)
     fora = [c for c in rodadas if c not in avaliaveis]
     if fora:

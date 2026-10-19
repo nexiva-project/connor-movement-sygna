@@ -285,7 +285,7 @@ def test_gravacao_vira_janelas_so_onde_ha_mao(rng):
 def test_montar_amostras_inclui_o_espelho_no_mesmo_grupo(rng):
     gravacao = gravacao_falsa(vetor_de_uma_mao(rng, "dir"), rng, 20)
     dados = ConjuntoDados(gravacao, np.array(["oi"] * 20), np.array([7] * 20))
-    amostras = montar_amostras(dados, tamanho=12, passo=2, velocidades=())
+    amostras = montar_amostras(dados, tamanho=12, passo=2, velocidades=(), mascara=())
     assert len(amostras) == 10 and set(amostras.grupos.tolist()) == {7}
     # A forma das mãos são as primeiras 126 colunas da janela.
     tem_dir = np.abs(amostras.X[:, 63:126]).sum(axis=1) > 0
@@ -296,9 +296,9 @@ def test_montar_amostras_inclui_o_espelho_no_mesmo_grupo(rng):
 def test_montar_amostras_inclui_outras_velocidades(rng):
     gravacao = gravacao_falsa(vetor_de_uma_mao(rng, "dir"), rng, 20)
     dados = ConjuntoDados(gravacao, np.array(["oi"] * 20), np.array([7] * 20))
-    normal = montar_amostras(dados, tamanho=12, passo=2, velocidades=())
+    normal = montar_amostras(dados, tamanho=12, passo=2, velocidades=(), mascara=())
     com_velocidades = montar_amostras(
-        dados, tamanho=12, passo=2, velocidades=(0.5, 2.0)
+        dados, tamanho=12, passo=2, velocidades=(0.5, 2.0), mascara=()
     )
     # 0.5 = mais devagar (mais quadros, mais janelas); 2.0 = rápido demais
     # para uma janela de 12 (10 quadros). Cada versão também vem espelhada.

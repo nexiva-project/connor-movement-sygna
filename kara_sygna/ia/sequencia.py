@@ -23,6 +23,7 @@ import numpy as np
 
 from kara_sygna import config
 from kara_sygna.dados.repositorio import ConjuntoDados
+from kara_sygna.ia.mascara import copias_mascaradas
 from kara_sygna.visao.quadro import (
     COLUNA_CORPO_PRESENTE,
     COLUNAS_PULSO_BRACO,
@@ -193,24 +194,39 @@ def montar_amostras(
     tamanho: int = config.QUADROS_POR_JANELA,
     passo: int = config.PASSO_JANELA_TREINO,
     velocidades: tuple[float, ...] = config.VELOCIDADES_TREINO,
+    mascara: tuple[float, ...] | None = None,
 ) -> ConjuntoDados:
     """Transforma os quadros gravados nas amostras (janelas) do treino.
 
     Cada gravação (rodada) é cortada em janelas. Cada gravação também entra
     espelhada, para que um sinal feito com uma mão valha para a outra, e em
     outras ``velocidades`` (mais rápida e mais devagar), para o sinal ser
-    reconhecido no ritmo de cada um. As cópias ficam no mesmo grupo da
-    original, então nunca vazam para o teste.
+    reconhecido no ritmo de cada um. Com ``config.MASCARA_FRACOES``, também
+    entram cópias com a mão sumindo (:mod:`kara_sygna.ia.mascara`). As cópias
+    ficam no mesmo grupo da original, então nunca vazam para o teste.
 
     Args:
         dados: Quadros do CSV, com a rodada de cada um, em ordem de gravação.
+        mascara: Partes da mão apagadas nas cópias. ``None`` =
+            ``config.MASCARA_FRACOES``; ``()`` = sem cópias.
 
     Returns:
-        ``ConjuntoDados`` com ``X`` de ``total_features_janela()`` colunas.
+        ``ConjuntoDados`` com ``X`` de ``total_features_janela()`` colunas e
+        ``mascarada`` dizendo quais linhas vêm das cópias.
     """
+    if mascara is not None:
+        fracoes = mascara
+    elif config.USAR_LUGAR:
+        # Com o lugar, muita mão apagada atrapalha: num teste com 3 sinais que
+        # só mudam de lugar, 30% e 50% derrubaram a validação de 99% para 79%;
+        # só 15% não atrapalhou.
+        fracoes = tuple(f for f in config.MASCARA_FRACOES if f <= 0.15)
+    else:
+        fracoes = config.MASCARA_FRACOES
     X: list[np.ndarray] = []
     y: list[str] = []
     grupos: list = []
+    mascarada: list[bool] = []
     for rodada in dict.fromkeys(dados.grupos.tolist()):
         da_rodada = dados.grupos == rodada
         rotulos = dados.y[da_rodada]
@@ -220,16 +236,25 @@ def montar_amostras(
             sequencia = quadros[rotulos == rotulo]
             # Gravação curta demais não vira janela, nem mais devagar.
             fatores = (1.0, *velocidades) if len(sequencia) >= tamanho else (1.0,)
-            for espelho in (sequencia, espelhar_quadros(sequencia)):
-                for fator in dict.fromkeys(fatores):
-                    versao = mudar_velocidade(espelho, fator)
-                    janelas = janelas_de_uma_gravacao(versao, tamanho, passo)
-                    X.append(janelas)
-                    y += [rotulo] * len(janelas)
-                    grupos += [rodada] * len(janelas)
+            # Cópias com a mão sumindo (máscara), cada uma como uma gravação.
+            copias = copias_mascaradas(sequencia, int(rodada) % 2**32, fracoes)
+            for numero, original in enumerate([sequencia, *copias]):
+                for espelho in (original, espelhar_quadros(original)):
+                    for fator in dict.fromkeys(fatores):
+                        versao = mudar_velocidade(espelho, fator)
+                        janelas = janelas_de_uma_gravacao(versao, tamanho, passo)
+                        X.append(janelas)
+                        y += [rotulo] * len(janelas)
+                        grupos += [rodada] * len(janelas)
+                        mascarada += [numero > 0] * len(janelas)
 
     matriz = np.vstack(X) if X else np.empty((0, total_features_janela()))
-    return ConjuntoDados(matriz, np.asarray(y, dtype=str), np.asarray(grupos))
+    return ConjuntoDados(
+        matriz,
+        np.asarray(y, dtype=str),
+        np.asarray(grupos),
+        np.asarray(mascarada, dtype=bool),
+    )
 
 
 class BufferQuadros:

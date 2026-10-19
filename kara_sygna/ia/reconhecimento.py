@@ -67,8 +67,13 @@ class Estabilizador:
 
     * Precisa de ``votos_minimos`` entre os últimos ``janela`` quadros.
     * Depois de confirmar, o mesmo sinal só é confirmado de novo depois de
-      ``quadros_para_liberar`` quadros sem ele (tirar a mão, trocar de sinal).
+      ``quadros_para_liberar`` quadros com voto em **outro** sinal, ou
+      ``quadros_para_liberar_sem_voto`` quadros sem ele no total (tirar a mão).
       Assim é possível escrever "um um", e um sinal segurado não se repete.
+
+    Os quadros sem voto (mão sumida por borrão, IA incerta) podem liberar mais
+    devagar que os de outro sinal: no "carro" rápido a mão some por instantes,
+    e com a mesma regra para os dois o carro era escrito de novo a cada volta.
     """
 
     def __init__(
@@ -76,11 +81,21 @@ class Estabilizador:
         janela: int = config.JANELA_ESTABILIZADOR,
         votos_minimos: int = config.VOTOS_MINIMOS,
         quadros_para_liberar: int = config.QUADROS_PARA_LIBERAR,
+        quadros_para_liberar_sem_voto: int | None = None,
     ) -> None:
-        """Cria o estabilizador (veja a classe para o significado dos números)."""
+        """Cria o estabilizador (veja a classe para o significado dos números).
+
+        ``quadros_para_liberar_sem_voto=None`` usa ``quadros_para_liberar``
+        (sem voto e outro sinal liberam igual, como antes).
+        """
         self.janela = janela
         self.votos_minimos = votos_minimos
         self.quadros_para_liberar = quadros_para_liberar
+        self.quadros_para_liberar_sem_voto = (
+            quadros_para_liberar
+            if quadros_para_liberar_sem_voto is None
+            else quadros_para_liberar_sem_voto
+        )
         self.reiniciar()
 
     def reiniciar(self) -> None:
@@ -88,6 +103,7 @@ class Estabilizador:
         self._historico: deque = deque(maxlen=self.janela)
         self._travado: str | None = None
         self._quadros_sem_travado = 0
+        self._quadros_outro_sinal = 0
 
     def atualizar(self, sinal: str | None) -> str | None:
         """Registra o resultado de um quadro.
@@ -101,10 +117,15 @@ class Estabilizador:
         self._historico.append(sinal)
 
         if self._travado is not None:
-            self._quadros_sem_travado = (
-                0 if sinal == self._travado else self._quadros_sem_travado + 1
-            )
-            if self._quadros_sem_travado >= self.quadros_para_liberar:
+            if sinal == self._travado:
+                self._quadros_sem_travado = self._quadros_outro_sinal = 0
+            else:
+                self._quadros_sem_travado += 1
+                self._quadros_outro_sinal += sinal is not None
+            if (
+                self._quadros_outro_sinal >= self.quadros_para_liberar
+                or self._quadros_sem_travado >= self.quadros_para_liberar_sem_voto
+            ):
                 self._travado = None
 
         votos = Counter(s for s in self._historico if s is not None)
@@ -113,6 +134,6 @@ class Estabilizador:
         candidato, quantidade = votos.most_common(1)[0]
         if quantidade >= self.votos_minimos and candidato != self._travado:
             self._travado = candidato
-            self._quadros_sem_travado = 0
+            self._quadros_sem_travado = self._quadros_outro_sinal = 0
             return candidato
         return None

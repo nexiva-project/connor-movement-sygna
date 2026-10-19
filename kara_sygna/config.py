@@ -42,18 +42,24 @@ PAUSA_ENTRE_LEITURAS_S = 0.05
 MAX_MAOS = 2
 # 0.5: com 0.7, mãos borradas pelo movimento eram descartadas (no teste com
 # o sinal "carro", 42% dos quadros ficavam sem nenhuma mão; com 0.5, 24%).
-CONFIANCA_DETECCAO = 0.5
+# 0.3 (laboratório, 19/10/2026): nos 11 vídeos de teste, junto com o realce
+# desligado e a memória de 0.8 s, a mão sumida caiu de 37% para 8%.
+CONFIANCA_DETECCAO = 0.3
 # 0.3: no vídeo do sinal "carro", foi o valor que mais manteve as duas mãos.
 CONFIANCA_RASTREIO = 0.3
 # O detector de mãos recebe uma cópia da imagem com a pele clara e o resto
 # escuro (a cor da pele é medida no rosto), para as mãos se destacarem da
 # roupa. Só o detector vê essa cópia; a tela mostra a imagem normal.
-REALCE_PELE = True
+# False (laboratório, 19/10/2026): nos vídeos de teste, sem realce a mão
+# sumida caiu de 37% para 16% e a casa no escuro passou a ser reconhecida.
+REALCE_PELE = False
 # Quanto sobra do que não é pele (0 = preto, 1 = sem realce).
 REALCE_PELE_ESCURO = 0.1
 # Se uma mão some por até estes segundos (quadro borrado), continua valendo a
 # última posição dela, no desenho e na IA. 0 = desliga.
-MEMORIA_MAO_S = 0.3
+# 0.8 (laboratório, 19/10/2026): nos vídeos de teste, a mão sumida caiu de
+# 37% para 25% sozinha, sem piorar nenhum sinal.
+MEMORIA_MAO_S = 0.8
 
 # MediaPipe Pose (braços): 0 = modelo leve (~13 ms por quadro), 1 = completo.
 COMPLEXIDADE_POSE = 0
@@ -82,7 +88,12 @@ CONFIANCA_MINIMA = 0.70  # probabilidade mínima do melhor sinal
 MARGEM_MINIMA = 0.15  # melhor - segundo melhor (evita empates)
 JANELA_ESTABILIZADOR = 10  # quadros considerados na votação
 VOTOS_MINIMOS = 6  # votos necessários para confirmar um sinal
-QUADROS_PARA_LIBERAR = 8  # quadros sem o sinal para poder repeti-lo
+QUADROS_PARA_LIBERAR = 8  # quadros com OUTRO sinal para poder repetir o sinal
+# Quadros sem o sinal no total (mão sumida, IA incerta) para poder repeti-lo.
+# 60 (2 s): nos vídeos de teste, o carro contínuo era escrito até 10 vezes com
+# 8 (como era antes) e 1 vez com 60. Para repetir o mesmo sinal, abaixe as mãos
+# por 2 s ou passe pelo neutro (outro sinal libera em QUADROS_PARA_LIBERAR).
+QUADROS_PARA_LIBERAR_SEM_VOTO = 60
 # Rótulos aprendidos pela IA que NÃO viram texto (ex.: mão relaxada).
 ROTULOS_IGNORADOS = frozenset({"neutro", "nada"})
 
@@ -165,6 +176,15 @@ PASSO_JANELA_TREINO = 2
 # Velocidades extras de cada gravação no treino (0.75 = mais devagar, 1.33 =
 # mais rápido), para o sinal valer feito em ritmos diferentes. () = desliga.
 VELOCIDADES_TREINO = (0.75, 1.33)
+# Máscara no treino (kara_sygna.ia.mascara): cada gravação também entra com a
+# mão sumindo nestas partes dos quadros, como acontece ao vivo com a mão
+# borrada. () = desliga. Os buracos têm de MIN a MAX quadros (15 ≈ 0,5 s).
+# Desligada (laboratório, 19/10/2026): com (0.15, 0.3, 0.5) a validação caiu
+# de 99,0% para 85,8%, e nos 11 vídeos de teste o modelo sem máscara foi igual
+# ou melhor em 9.
+MASCARA_FRACOES = ()
+MASCARA_BURACO_MIN = 2
+MASCARA_BURACO_MAX = 15
 # Durante o ensino, os quadros ficam na memória e vão para o disco ao parar
 # (ou a cada tantos quadros, em gravações longas). Antes de gravar, as mãos
 # que sumiram por pouco tempo são preenchidas entre antes e depois.

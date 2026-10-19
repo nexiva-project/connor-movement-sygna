@@ -82,11 +82,14 @@ class ConjuntoDados:
             :func:`kara_sygna.ia.sequencia.montar_amostras`.
         y: Vetor (n,) com o rótulo (palavra) de cada linha.
         grupos: Vetor (n,) com a rodada de cada linha.
+        mascarada: Vetor booleano (n,): a linha vem de uma cópia com a mão
+            apagada (:mod:`kara_sygna.ia.mascara`). ``None`` = nenhuma.
     """
 
     X: np.ndarray
     y: np.ndarray
     grupos: np.ndarray
+    mascarada: np.ndarray | None = None
 
     def __len__(self) -> int:
         """Quantidade de linhas."""

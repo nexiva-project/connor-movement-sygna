@@ -56,6 +56,36 @@ def test_estabilizador_permite_repetir_depois_de_soltar():
     assert saida.count("a") == 2
 
 
+def test_mao_sumida_libera_mais_devagar_que_outro_sinal():
+    # Mão sumida por 4 quadros (borrão) no meio do sinal: não escreve de novo.
+    e = Estabilizador(
+        janela=4,
+        votos_minimos=3,
+        quadros_para_liberar=2,
+        quadros_para_liberar_sem_voto=10,
+    )
+    saida = [e.atualizar(s) for s in ["a"] * 3 + [None] * 4 + ["a"] * 3]
+    assert saida.count("a") == 1
+    # Outro sinal no meio libera com quadros_para_liberar, como antes.
+    e = Estabilizador(
+        janela=4,
+        votos_minimos=3,
+        quadros_para_liberar=2,
+        quadros_para_liberar_sem_voto=10,
+    )
+    saida = [e.atualizar(s) for s in ["a"] * 3 + ["b"] * 4 + ["a"] * 4]
+    assert saida.count("a") == 2
+    # Tirar a mão por tempo suficiente também libera.
+    e = Estabilizador(
+        janela=4,
+        votos_minimos=3,
+        quadros_para_liberar=2,
+        quadros_para_liberar_sem_voto=10,
+    )
+    saida = [e.atualizar(s) for s in ["a"] * 3 + [None] * 10 + ["a"] * 3]
+    assert saida.count("a") == 2
+
+
 def test_estabilizador_ignora_ruido_isolado():
     e = Estabilizador(janela=10, votos_minimos=6, quadros_para_liberar=8)
     assert [e.atualizar(s) for s in ["a", "b", "a", "c", "a", "b"]] == [None] * 6

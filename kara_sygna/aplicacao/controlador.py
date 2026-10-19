@@ -134,7 +134,9 @@ class ControladorSinais:
         self.caminho_modelo_pre = caminho_modelo_pre(self.caminho_modelo)
         self._carregador_modelo = carregador_modelo
         self._relogio = relogio
-        self.estabilizador = Estabilizador()
+        self.estabilizador = Estabilizador(
+            quadros_para_liberar_sem_voto=config.QUADROS_PARA_LIBERAR_SEM_VOTO
+        )
         self.buffer = BufferQuadros()
         self.modo = Modo.PARADO
         self.rotulo_atual = ""
