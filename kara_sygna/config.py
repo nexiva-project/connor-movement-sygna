@@ -199,6 +199,11 @@ SEGUNDOS_CONTAGEM_ENSINO = 3
 # Interface
 # ---------------------------------------------------------------------------
 INTERVALO_QUADRO_MS = 15
+# Quantos detectores de MÃOS analisam quadros ao mesmo tempo, em revezamento
+# (kara_sygna.visao.revezamento); rosto e braços ficam numa thread só. 1 = um
+# quadro por vez, como antes (~15 qps ao vivo). 2 (laboratório, 19/10/2026):
+# ~30 qps, e as trocas rápidas carro→casa passaram a ser todas reconhecidas.
+REVEZAMENTO_DETECTORES = 2
 # Tamanho da janela principal ao abrir (menor, se a tela for menor).
 LARGURA_JANELA_PADRAO = 1024
 ALTURA_JANELA_PADRAO = 768

@@ -50,6 +50,11 @@ from kara_sygna.visao.maos_pelo_corpo import conferir_maos
 from kara_sygna.visao.memoria_maos import MemoriaMaos
 from kara_sygna.visao.quadro import montar_vetor_quadro
 from kara_sygna.visao.realce_pele import RealcePele
+from kara_sygna.visao.revezamento import (
+    Deteccao,
+    LeitorEmThread,
+    VisaoEmRevezamento,
+)
 from kara_sygna.visao.suavizacao import SuavizadorPontos
 
 logger = logging.getLogger(__name__)
@@ -219,6 +224,19 @@ class JanelaPrincipal:
         self._executor_corpo = ThreadPoolExecutor(1, thread_name_prefix="corpo")
         self._memoria_maos = MemoriaMaos()
         self._realce_pele = RealcePele()
+        # Revezamento: vários detectores de mãos analisam quadros ao mesmo
+        # tempo; rosto e braços numa thread só (veja visao/revezamento.py). O
+        # primeiro detector de mãos é o recebido; os outros são criados aqui e
+        # fechados em fechar().
+        self._revezamento: VisaoEmRevezamento | None = None
+        self._leitor: LeitorEmThread | None = None
+        if config.REVEZAMENTO_DETECTORES > 1:
+            maos = [detector] + [
+                DetectorMaos() for _ in range(config.REVEZAMENTO_DETECTORES - 1)
+            ]
+            self._revezamento = VisaoEmRevezamento(
+                maos, detector_rosto, self._realce_pele, detector_corpo
+            )
 
         self._arquivo_config_suavizacao = Path.home() / ".kara_sygna_suavizacao.json"
 
@@ -1871,10 +1889,15 @@ class JanelaPrincipal:
 
     def iniciar_captura(self) -> None:
         """Começa a captura quando o loop do Tkinter já está rodando."""
+        if self._revezamento is not None:
+            self._leitor = LeitorEmThread(self._camera)
         self._atualizar_quadro()
 
     def _atualizar_quadro(self) -> None:
         if self._encerrado:
+            return
+        if self._revezamento is not None:
+            self._atualizar_em_revezamento()
             return
 
         try:
@@ -1894,6 +1917,40 @@ class JanelaPrincipal:
             self._status.set(f"Erro na câmera: {erro}")
 
         self._agendar(config.INTERVALO_QUADRO_MS)
+
+    def _atualizar_em_revezamento(self) -> None:
+        """Um passo do laço com detectores em revezamento.
+
+        Manda o quadro mais novo da câmera para uma equipe livre e, quando o
+        quadro mais antigo em análise fica pronto, termina ele aqui (na ordem).
+        Volta logo (1 ms): a câmera e os detectores trabalham em outras threads.
+        """
+        try:
+            novo = self._leitor.pegar_novo() if self._leitor is not None else None
+            if novo is not None and not self._revezamento.cheia:
+                self._revezamento.enviar(cv2.flip(novo, 1))
+            if self._revezamento.pronta():
+                self._terminar_deteccao(self._revezamento.pegar())
+            elif self._leitor is not None and self._leitor.falhando:
+                self._status.set("Não foi possível ler a câmera.")
+        except Exception as erro:
+            mensagem = f"{type(erro).__name__}: {erro}"
+            if mensagem != self._ultimo_erro_quadro:
+                logger.error("Erro no laço da câmera", exc_info=erro)
+                self._ultimo_erro_quadro = mensagem
+            self._status.set(f"Erro na câmera: {erro}")
+
+        self._agendar(1)
+
+    def _terminar_deteccao(self, deteccao: Deteccao) -> None:
+        """Termina na janela um quadro analisado por uma equipe."""
+        self._depois_da_deteccao(
+            deteccao.quadro.copy(),
+            deteccao.quadro,
+            deteccao.rosto,
+            deteccao.maos,
+            deteccao.corpo,
+        )
 
     def _agendar(self, ms: int) -> None:
         try:
@@ -1921,6 +1978,18 @@ class JanelaPrincipal:
             self._realce_pele.aplicar(quadro_original)
         )
         resultado_corpo = corpo_futuro.result() if corpo_futuro is not None else None
+        self._depois_da_deteccao(
+            quadro, quadro_original, resultado_rosto, maos_detectadas, resultado_corpo
+        )
+
+    def _depois_da_deteccao(
+        self, quadro, quadro_original, resultado_rosto, maos_detectadas, resultado_corpo
+    ) -> None:
+        """Do resultado dos detectores em diante: braços, memória, desenho e IA.
+
+        ``quadro`` recebe o desenho; ``quadro_original`` é o que os detectores
+        viram (os dados que vão para a IA).
+        """
         # Só valem mãos na ponta de um braço; o lado de cada uma é o do braço.
         altura_q, largura_q = quadro_original.shape[:2]
         maos_detectadas = conferir_maos(
@@ -2146,6 +2215,17 @@ class JanelaPrincipal:
         logger.info("Encerrando Kara Sygna.")
 
         self._fechar_configuracoes()
+
+        # Primeiro param as threads que usam a câmera e os detectores.
+        if self._leitor is not None:
+            self._leitor.parar()
+        if self._revezamento is not None:
+            self._revezamento.fechar()
+            for detector in self._revezamento.maos[1:]:
+                try:
+                    detector.fechar()
+                except Exception:
+                    logger.exception("Erro ao fechar um detector de mãos extra")
 
         try:
             self._detector.fechar()
