@@ -33,6 +33,9 @@ def ctrl(tmp_path, monkeypatch):
     # quadros têm testes próprios.
     monkeypatch.setattr(config, "MODO_QUADROS", "fixo")
     monkeypatch.setattr(config, "USAR_1_A_CADA_QUADROS", 1)
+    # Os quadros falsos são parados; o portão de movimento tem testes próprios
+    # (aqui embaixo e em test_portao.py).
+    monkeypatch.setattr(config, "PORTAO_MOVIMENTO_LIMITE", 0)
     return ControladorSinais(
         RepositorioSinais(tmp_path / "d.csv"),
         tmp_path / "m.pkl",
@@ -396,6 +399,20 @@ def test_sinal_com_pre_sinal_so_vale_depois_do_pre_sinal(ctrl, rng):
     classificador.mostrando = False
     assert _confirmados(ctrl, rng, 30).count("a") == 1
     assert ctrl.pre_ativo is None  # depois do sinal, espera outro pré-sinal
+
+
+def test_portao_bloqueia_sinal_com_pre_sinal_feito_parado(ctrl, rng, monkeypatch):
+    monkeypatch.setattr(config, "PORTAO_MOVIMENTO_LIMITE", 0.8)
+    classificador, _ = _reconhecer_com_pre(ctrl, rng)  # recria o portão ligado
+    classificador.mostrando = True
+    _confirmados(ctrl, rng, config.VOTOS_MINIMOS)
+    assert ctrl.pre_ativo == "S"
+    classificador.mostrando = False
+    # "a" tem pré-sinal e os quadros falsos estão parados (com corpo): não vale.
+    assert "a" not in _confirmados(ctrl, rng, 30)
+    assert ctrl._diag["motivo"] == "parado"
+    resposta = ctrl.processar_quadro(_quadro(rng))
+    assert resposta.texto_video == "NADA"  # a tela não mostra o sinal bloqueado
 
 
 def test_pre_sinal_expira_sem_sinal(ctrl, rng):

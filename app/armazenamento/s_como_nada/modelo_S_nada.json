@@ -1,0 +1,11 @@
+{
+  "amostras": 9574,
+  "classes": [
+    "carro",
+    "casa",
+    "nada",
+    "neutro"
+  ],
+  "rodadas": 21,
+  "acuracia_validacao": 0.9822
+}

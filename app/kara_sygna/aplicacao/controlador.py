@@ -37,6 +37,7 @@ from kara_sygna.ia.modelo_io import (
     classes_do_modelo,
     modelo_esta_atualizado,
 )
+from kara_sygna.ia.portao import PortaoMovimento
 from kara_sygna.ia.pre_sinais import (
     ModeloPreSinais,
     caminho_modelo_pre,
@@ -45,6 +46,7 @@ from kara_sygna.ia.pre_sinais import (
     treinar_pre_sinais,
 )
 from kara_sygna.ia.reconhecimento import Estabilizador, prever
+from kara_sygna.ia.regiao import RegiaoMaos
 from kara_sygna.ia.sequencia import BufferQuadros
 from kara_sygna.visao.preenchimento import preencher_buracos
 from kara_sygna.visao.quadro import (
@@ -138,6 +140,10 @@ class ControladorSinais:
             quadros_para_liberar_sem_voto=config.QUADROS_PARA_LIBERAR_SEM_VOTO
         )
         self.buffer = BufferQuadros()
+        # Só vota com as mãos em movimento (a mão parada em S virava "carro").
+        self.portao = PortaoMovimento()
+        # Distância máxima entre as mãos de cada sinal (aprendida ao reconhecer).
+        self.regiao = RegiaoMaos()
         self.modo = Modo.PARADO
         self.rotulo_atual = ""
         self.tipo_atual = TIPO_SINAL
@@ -308,6 +314,13 @@ class ControladorSinais:
         self._pre_recentes = {}
         self.estabilizador.reiniciar()
         self.buffer.limpar()
+        self.portao = PortaoMovimento()  # lê o limite atual do config
+        self.regiao = RegiaoMaos.das_gravacoes(self.repositorio.carregar())
+        if self.regiao.limites:
+            logger.info(
+                "Distância máxima entre as mãos: %s",
+                {s: round(v, 2) for s, v in self.regiao.limites.items()},
+            )
         self.filtro_quadros = FiltroQuadros()  # lê o modo atual do config
         self._ultima_resposta = ResultadoQuadro("PREPARANDO...")
         self._ultimo_voto = None
@@ -444,7 +457,27 @@ class ControladorSinais:
         else:
             self._diag.update(self._ultimo_diag, motivo="repete")
 
-        confirmado = self.estabilizador.atualizar(self._ultimo_voto)
+        aberto = self.portao.atualizar(vetor, self._relogio())
+        self.regiao.atualizar(vetor)
+        if self.regiao.distancia is not None:
+            self._diag["dist_maos"] = round(self.regiao.distancia, 2)
+        voto = self._ultimo_voto
+        resposta = self._ultima_resposta
+        if voto is not None and not aberto and self._tem_pre_sinal(voto):
+            # Sinal com pré-sinal achado com as mãos paradas: é a forma do
+            # pré-sinal (ex.: a mão em S antes do carro), não o sinal.
+            self._diag["motivo"] = "parado"
+            voto = None
+            resposta = ResultadoQuadro("NADA", Nivel.NEUTRO, "Nada: mãos paradas")
+        elif voto is not None and not self.regiao.permite(voto):
+            # Sinal de duas mãos com as mãos longe demais (ex.: braços abertos
+            # não formam o volante do carro).
+            self._diag["motivo"] = "longe"
+            voto = None
+            resposta = ResultadoQuadro(
+                "NADA", Nivel.NEUTRO, "Nada: mãos longe uma da outra"
+            )
+        confirmado = self.estabilizador.atualizar(voto)
         if confirmado in config.ROTULOS_IGNORADOS:
             confirmado = None
         if confirmado:
@@ -468,12 +501,13 @@ class ControladorSinais:
                     **self._diag,
                     "pre_ativo": ativo or "",
                     "pre_restante_s": restante,
-                    "voto": self._ultimo_voto or "",
+                    "voto": voto or "",
                     "escrito": confirmado or "",
                 }
             )
         # O pré-sinal visto não aparece na tela (fica no log e no diagnóstico).
-        return replace(self._ultima_resposta, sinal_confirmado=confirmado)
+        # Voto bloqueado (parado ou longe) mostra "NADA", não o sinal da IA.
+        return replace(resposta, sinal_confirmado=confirmado)
 
     @property
     def pre_ativo(self) -> str | None:
@@ -505,6 +539,15 @@ class ControladorSinais:
             logger.info("Pré-sinal visto: %s (%.0f%%)", visto, 100 * confianca)
             self._diag["pre_novo"] = visto
             self._pre_recentes[visto] = agora + self.espera_sinal_s
+
+    def _tem_pre_sinal(self, sinal: str) -> bool:
+        """O sinal vem depois de um pré-sinal (e por isso precisa de movimento).
+
+        Só estes passam pelo portão de movimento: o pré-sinal é a forma da mão
+        parada antes do sinal, e sem movimento os dois se confundem. Sinais
+        sem pré-sinal, parados ou não, nunca são bloqueados.
+        """
+        return self._pre is not None and sinal in self._pre.sinal_para_pre
 
     def _limite_do_sinal(self, sinal: str) -> float:
         """Confiança mínima para aceitar um sinal agora.

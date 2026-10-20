@@ -18,6 +18,10 @@ Motivos:
   teve muita certeza (``config.CONFIANCA_SEM_PRE_SINAL``).
 * ``repete``: quadro igual ao anterior (o filtro de quadros não o usou); vale
   a decisão anterior.
+* ``parado``: a IA achou um sinal, mas as mãos estavam paradas (portão de
+  movimento, :mod:`kara_sygna.ia.portao`); o voto não vale.
+* ``longe``: a IA achou um sinal de duas mãos, mas as mãos estavam longe
+  demais uma da outra (:mod:`kara_sygna.ia.regiao`); o voto não vale.
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ CAMPOS = (
     "mao_dir",
     "corpo",
     "rosto",
+    "dist_maos",
     "pre_visto",
     "pre_pct",
     "pre_ativo",
@@ -63,6 +68,8 @@ MOTIVOS = (
     "ok",
     "ok_sem_pre",
     "repete",
+    "parado",
+    "longe",
 )
 
 

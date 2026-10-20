@@ -50,6 +50,19 @@ class Roteiro:
     sinal: str
     instrucao: str
     grupo: str
+    #: Etapas guiadas na tela: (tipo, nome, segundos), tipo "pre" ou "sinal".
+    #: Vazio = vídeo livre, com a duração de ``--segundos``.
+    etapas: tuple[tuple[str, str, float], ...] = ()
+
+    @property
+    def segundos_etapas(self) -> float:
+        return sum(s for _, _, s in self.etapas)
+
+
+#: S (4 s) → carro (6 s), duas vezes: o carro é feito com as mãos em S, e o
+#: app usa o S visto há pouco para aceitar o carro com menos certeza.
+ETAPAS_S_CARRO = (("pre", "S", 4.0), ("sinal", "carro", 6.0)) * 2
+ETAPAS_B_CASA = (("pre", "B", 4.0), ("sinal", "casa", 6.0)) * 2
 
 
 ROTEIROS = [
@@ -69,6 +82,8 @@ ROTEIROS = [
     Roteiro("carro_casa_carro", "carro,casa", "carro -> casa -> carro, sem parar", "Movimento"),
     Roteiro("carro_outra_mao", "carro", "carro com a OUTRA mao na frente", "Movimento"),
     Roteiro("outra_pessoa", "carro,casa", "OUTRA pessoa: carro e depois casa", "Outra pessoa"),
+    Roteiro("presinal_s", "pre:S", "so o S, girando a mao para varios lados", "Pre-sinal", (("pre", "S", 10.0),)),
+    Roteiro("presinal_b", "pre:B", "so o B, girando a mao para varios lados", "Pre-sinal", (("pre", "B", 10.0),)),
 ]
 
 
@@ -83,6 +98,28 @@ def _texto(imagem, linhas: list[str], cor=(255, 255, 255), escala: float = 0.7) 
         cv2.putText(imagem, linha, (12, y), cv2.FONT_HERSHEY_SIMPLEX, escala, (0, 0, 0), 5, cv2.LINE_AA)
         cv2.putText(imagem, linha, (12, y), cv2.FONT_HERSHEY_SIMPLEX, escala, cor, 2, cv2.LINE_AA)
         y += int(36 * escala / 0.7)
+
+
+def _etapas_no_tempo(roteiro: Roteiro) -> list[dict]:
+    """As etapas com o segundo em que começam e terminam no vídeo."""
+    saida, inicio = [], 0.0
+    for tipo, nome, segundos in roteiro.etapas:
+        saida.append({"tipo": tipo, "nome": nome, "inicio_s": inicio, "fim_s": inicio + segundos})
+        inicio += segundos
+    return saida
+
+
+def _etapa_na_tela(tela, roteiro: Roteiro, t: float) -> None:
+    """Escreve grande a etapa de agora (amarelo = pré-sinal, verde = sinal)."""
+    for etapa in _etapas_no_tempo(roteiro):
+        if etapa["inicio_s"] <= t < etapa["fim_s"]:
+            pre = etapa["tipo"] == "pre"
+            texto = f"{'PRE-SINAL' if pre else 'SINAL'}: {etapa['nome']}  ({etapa['fim_s'] - t:.0f} s)"
+            cor = (0, 230, 255) if pre else (80, 220, 80)
+            altura = tela.shape[0]
+            cv2.rectangle(tela, (0, altura - 90), (tela.shape[1], altura - 30), (20, 20, 20), -1)
+            cv2.putText(tela, texto, (16, altura - 47), cv2.FONT_HERSHEY_SIMPLEX, 1.1, cor, 3, cv2.LINE_AA)
+            return
 
 
 def abrir_camera(indice: int) -> cv2.VideoCapture:
@@ -106,6 +143,8 @@ def gravar(captura: cv2.VideoCapture, roteiro: Roteiro, segundos: float, mostrar
     """
     PASTA_VIDEOS.mkdir(exist_ok=True)
     caminho = PASTA_VIDEOS / f"{roteiro.nome}.avi"
+    if roteiro.etapas:
+        segundos = roteiro.segundos_etapas
     escritor = None
     tempos: list[float] = []
     cancelado = False
@@ -139,6 +178,8 @@ def gravar(captura: cv2.VideoCapture, roteiro: Roteiro, segundos: float, mostrar
                         [f"GRAVANDO {segundos - (agora - t0):4.1f} s | {qps:4.1f} qps", roteiro.instrucao],
                         (0, 0, 255),
                     )
+                    if roteiro.etapas:
+                        _etapa_na_tela(tela, roteiro, agora - t0)
                 else:
                     _texto(tela, [f"PREPARE: {SEGUNDOS_CONTAGEM - agora:.0f}", roteiro.instrucao], (0, 255, 255))
                 _texto(tela, ["", "", "", "", "", "", "", "", "", "", "", "", "clique para cancelar"], escala=0.55)
@@ -170,6 +211,7 @@ def gravar(captura: cv2.VideoCapture, roteiro: Roteiro, segundos: float, mostrar
         "duracao_s": duracao,
         "qps_real": round((len(tempos) - 1) / duracao, 2) if duracao else 0.0,
         "tempos_s": tempos,
+        "etapas": _etapas_no_tempo(roteiro),
         "uso": "so teste (nao entra no treino)",
     }
     caminho.with_suffix(".json").write_text(json.dumps(dados, ensure_ascii=False, indent=1), encoding="utf-8")

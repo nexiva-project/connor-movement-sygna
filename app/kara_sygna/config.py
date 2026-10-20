@@ -94,6 +94,20 @@ QUADROS_PARA_LIBERAR = 8  # quadros com OUTRO sinal para poder repetir o sinal
 # 8 (como era antes) e 1 vez com 60. Para repetir o mesmo sinal, abaixe as mãos
 # por 2 s ou passe pelo neutro (outro sinal libera em QUADROS_PARA_LIBERAR).
 QUADROS_PARA_LIBERAR_SEM_VOTO = 60
+# Portão de movimento (kara_sygna.ia.portao): a IA só vota se o pulso se mexeu
+# mais que LIMITE (larguras de ombro por segundo) nos últimos JANELA_S. Assim a
+# mão parada em S não vira "carro". 0 = desliga. Laboratório, 20/10/2026: 0.8
+# e 0.5 s foram os melhores nos vídeos de teste.
+PORTAO_MOVIMENTO_LIMITE = 0.8
+PORTAO_MOVIMENTO_JANELA_S = 0.5
+# Região entre as mãos (kara_sygna.ia.regiao): num sinal de duas mãos, o voto
+# não vale se as mãos estiverem bem mais longe uma da outra do que nas
+# gravações (percentil 95 + esta folga, em larguras de ombro). O lugar do sinal
+# continua livre. Negativo = desliga.
+REGIAO_MAOS_FOLGA = 0.4
+# Quadros recentes que a região olha: se as mãos ficaram longe em qualquer um
+# deles, o voto não vale (ao vivo, a distância oscila em volta do limite).
+REGIAO_MAOS_MEMORIA = 15
 # Rótulos aprendidos pela IA que NÃO viram texto (ex.: mão relaxada).
 ROTULOS_IGNORADOS = frozenset({"neutro", "nada"})
 
