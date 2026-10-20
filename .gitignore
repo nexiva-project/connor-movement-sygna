@@ -1,0 +1,9 @@
+# Refeitos sozinhos
+videos/cache/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Backups e cópias de segurança locais
+*.zip
+app_tmp/

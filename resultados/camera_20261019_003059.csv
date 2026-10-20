@@ -1,0 +1,3 @@
+hora,backend,exposicao,ganho,rastreio,realce,qps,brilho,sem_mao_pct,sem_esq_pct,sem_dir_pct,duas_maos_pct,maior_buraco_s,buracos
+00:31:38,MediaFoundation,auto -5 (31.2 ms),-1.0,0.3,True,17.9,81.1,24.9,54.1,34.3,36.5,0.56,26
+00:31:55,MediaFoundation,auto -5 (31.2 ms),-1.0,0.3,True,18.8,80.4,48.1,74.6,58.2,15.3,1.33,18
