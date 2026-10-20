@@ -1,0 +1,139 @@
+"""Reconhecimento: previsão de um quadro e confirmação do sinal ao longo do tempo."""
+
+from __future__ import annotations
+
+from collections import Counter, deque
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from kara_sygna import config
+
+
+@dataclass(frozen=True)
+class Predicao:
+    """Resultado da previsão de um quadro.
+
+    Attributes:
+        sinal: Palavra mais provável.
+        confianca: Probabilidade dessa palavra (0 a 1).
+        margem: Diferença para a segunda mais provável (0 a 1).
+        aceito: ``True`` se confiança e margem passam dos limites.
+        probabilidades: Probabilidade de cada sinal (para o diagnóstico).
+    """
+
+    sinal: str
+    confianca: float
+    margem: float
+    aceito: bool
+    probabilidades: dict[str, float] = field(default_factory=dict)
+
+
+def _preparar_entrada(modelo: Any, matriz: np.ndarray):
+    """Põe os nomes de coluna esperados pelo modelo (evita avisos do scikit-learn)."""
+    nomes = getattr(modelo, "feature_names_in_", None)
+    return pd.DataFrame(matriz, columns=nomes) if nomes is not None else matriz
+
+
+def prever(modelo: Any, vetor: Sequence[float]) -> Predicao:
+    """Prevê o sinal de uma janela de quadros.
+
+    A IA já aprendeu as inclinações da mão no treino (aumento de dados), então
+    o vetor é avaliado uma única vez, sem testar rotações aqui.
+
+    Args:
+        modelo: Modelo com ``predict_proba`` e ``classes_``.
+        vetor: Vetor de uma janela (:func:`kara_sygna.ia.sequencia.features_janela`).
+
+    Returns:
+        :class:`Predicao`.
+    """
+    matriz = np.asarray(vetor, dtype=np.float64).reshape(1, -1)
+    p = modelo.predict_proba(_preparar_entrada(modelo, matriz))[0]
+    todas = {str(c): float(v) for c, v in zip(modelo.classes_, p, strict=True)}
+    ordem = np.argsort(p)[::-1]
+    confianca = float(p[ordem[0]])
+    segundo = float(p[ordem[1]]) if len(p) > 1 else 0.0
+    margem = confianca - segundo
+    aceito = confianca >= config.CONFIANCA_MINIMA and margem >= config.MARGEM_MINIMA
+    return Predicao(str(modelo.classes_[ordem[0]]), confianca, margem, aceito, todas)
+
+
+class Estabilizador:
+    """Confirma um sinal por votação numa janela de quadros.
+
+    * Precisa de ``votos_minimos`` entre os últimos ``janela`` quadros.
+    * Depois de confirmar, o mesmo sinal só é confirmado de novo depois de
+      ``quadros_para_liberar`` quadros com voto em **outro** sinal, ou
+      ``quadros_para_liberar_sem_voto`` quadros sem ele no total (tirar a mão).
+      Assim é possível escrever "um um", e um sinal segurado não se repete.
+
+    Os quadros sem voto (mão sumida por borrão, IA incerta) podem liberar mais
+    devagar que os de outro sinal: no "carro" rápido a mão some por instantes,
+    e com a mesma regra para os dois o carro era escrito de novo a cada volta.
+    """
+
+    def __init__(
+        self,
+        janela: int = config.JANELA_ESTABILIZADOR,
+        votos_minimos: int = config.VOTOS_MINIMOS,
+        quadros_para_liberar: int = config.QUADROS_PARA_LIBERAR,
+        quadros_para_liberar_sem_voto: int | None = None,
+    ) -> None:
+        """Cria o estabilizador (veja a classe para o significado dos números).
+
+        ``quadros_para_liberar_sem_voto=None`` usa ``quadros_para_liberar``
+        (sem voto e outro sinal liberam igual, como antes).
+        """
+        self.janela = janela
+        self.votos_minimos = votos_minimos
+        self.quadros_para_liberar = quadros_para_liberar
+        self.quadros_para_liberar_sem_voto = (
+            quadros_para_liberar
+            if quadros_para_liberar_sem_voto is None
+            else quadros_para_liberar_sem_voto
+        )
+        self.reiniciar()
+
+    def reiniciar(self) -> None:
+        """Esquece todo o histórico (use ao começar ou ao limpar o texto)."""
+        self._historico: deque = deque(maxlen=self.janela)
+        self._travado: str | None = None
+        self._quadros_sem_travado = 0
+        self._quadros_outro_sinal = 0
+
+    def atualizar(self, sinal: str | None) -> str | None:
+        """Registra o resultado de um quadro.
+
+        Args:
+            sinal: Palavra aceita neste quadro, ou ``None`` (sem mão ou incerto).
+
+        Returns:
+            A palavra recém-confirmada, ou ``None`` se nada foi confirmado agora.
+        """
+        self._historico.append(sinal)
+
+        if self._travado is not None:
+            if sinal == self._travado:
+                self._quadros_sem_travado = self._quadros_outro_sinal = 0
+            else:
+                self._quadros_sem_travado += 1
+                self._quadros_outro_sinal += sinal is not None
+            if (
+                self._quadros_outro_sinal >= self.quadros_para_liberar
+                or self._quadros_sem_travado >= self.quadros_para_liberar_sem_voto
+            ):
+                self._travado = None
+
+        votos = Counter(s for s in self._historico if s is not None)
+        if not votos:
+            return None
+        candidato, quantidade = votos.most_common(1)[0]
+        if quantidade >= self.votos_minimos and candidato != self._travado:
+            self._travado = candidato
+            self._quadros_sem_travado = self._quadros_outro_sinal = 0
+            return candidato
+        return None
