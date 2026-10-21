@@ -190,6 +190,10 @@ PASSO_JANELA_TREINO = 2
 # Velocidades extras de cada gravação no treino (0.75 = mais devagar, 1.33 =
 # mais rápido), para o sinal valer feito em ritmos diferentes. () = desliga.
 VELOCIDADES_TREINO = (0.75, 1.33)
+# Sinais de direção livre (ex.: "avião", marcados no ensino ou na lista): no
+# treino, o movimento também entra girado nestes ângulos (graus), para valer
+# para frente, para a esquerda, para cima... () = só como foi gravado.
+ANGULOS_DIRECAO_LIVRE = (45, 90, 135, 180, 225, 270, 315)
 # Máscara no treino (kara_sygna.ia.mascara): cada gravação também entra com a
 # mão sumindo nestas partes dos quadros, como acontece ao vivo com a mão
 # borrada. () = desliga. Os buracos têm de MIN a MAX quadros (15 ≈ 0,5 s).

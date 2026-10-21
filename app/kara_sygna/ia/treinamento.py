@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -135,6 +135,7 @@ def treinar(
     dados: ConjuntoDados,
     caminho_modelo: Path = config.ARQUIVO_MODELO,
     progresso: Progresso = lambda _m: None,
+    direcao_livre: Iterable[str] = (),
 ) -> ResultadoTreino:
     """Avalia, treina o modelo final com todos os dados e o salva.
 
@@ -144,6 +145,8 @@ def treinar(
         dados: Quadros carregados do CSV (em ordem de gravação).
         caminho_modelo: Onde salvar o ``.pkl``. Um resumo ``.json`` é salvo ao lado.
         progresso: Recebe mensagens de andamento.
+        direcao_livre: Sinais em que o movimento pode ir para qualquer lado
+            (entram também girados, veja :func:`montar_amostras`).
 
     Returns:
         :class:`ResultadoTreino`.
@@ -154,7 +157,7 @@ def treinar(
     if len(dados) == 0:
         raise TreinoImpossivelError("O CSV está vazio. Ensine pelo menos um sinal.")
     progresso("Montando as sequências de quadros...")
-    dados = montar_amostras(dados)
+    dados = montar_amostras(dados, direcao_livre=direcao_livre)
     if len(dados) == 0:
         raise TreinoImpossivelError(
             "As gravações são curtas demais ou não mostram as mãos. Grave cada "

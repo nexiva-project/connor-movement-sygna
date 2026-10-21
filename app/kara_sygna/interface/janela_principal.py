@@ -43,6 +43,7 @@ from kara_sygna.interface.janela_log import JanelaLog
 from kara_sygna.interface.janela_previsualizacao import JanelaPrevisualizacao
 from kara_sygna.interface.janela_sinais import JanelaSinais
 from kara_sygna.interface.tarefas import ExecutorTk
+from kara_sygna.interface.texto_video import escrever as escrever_texto
 from kara_sygna.visao.detector_corpo import DetectorCorpo
 from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
 from kara_sygna.visao.detector_rosto import DetectorRosto, ResultadoRosto
@@ -335,6 +336,7 @@ class JanelaPrincipal:
         self._etapa_atual: Etapa | None = None
         self._pre_ligado = tk.BooleanVar(master=raiz, value=False)
         self._pre_nome = tk.StringVar(master=raiz)
+        self._direcao_livre = tk.BooleanVar(master=raiz, value=False)
         self._sinal_atual = tk.StringVar(
             master=raiz,
             value="AGUARDANDO SINAL",
@@ -1509,6 +1511,20 @@ class JanelaPrincipal:
         ).pack(side="left")
         campo_pre.pack(side="left", padx=(8, 0), ipady=4)
 
+        # Direção livre: o movimento pode ir para qualquer lado (ex.: "avião").
+        tk.Checkbutton(
+            linha_pre,
+            text="Direção livre (gira)",
+            variable=self._direcao_livre,
+            bg="#111B2D",
+            fg="#DCE8FA",
+            selectcolor="#080D18",
+            activebackground="#111B2D",
+            activeforeground="#F1F7FF",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+        ).pack(side="left", padx=(10, 0))
+
         self._botao_estilizado(
             ensinar,
             "COMEÇAR A ENSINAR (ENTER)",
@@ -1729,6 +1745,9 @@ class JanelaPrincipal:
             return
 
         self._parar()  # para o reconhecimento ou um ensino em andamento
+        if self._direcao_livre.get():
+            # Só liga; para desligar, use a lista de sinais aprendidos.
+            self._controlador.marcar_direcao_livre(palavra, True)
         # Pré-sinal uma vez e o sinal em cada ritmo (veja aplicacao/etapas.py).
         self._etapas = montar_etapas(palavra, pre, duracao)
         self._proxima_etapa()
@@ -1859,6 +1878,7 @@ class JanelaPrincipal:
             self._controlador.listar_sinais,
             self._ver_sinal,
             self._apagar_sinal,
+            ao_direcao_livre=self._alternar_direcao_livre,
         )
 
     def _ver_sinal(self, palavra: str) -> None:
@@ -1872,6 +1892,13 @@ class JanelaPrincipal:
             self._janela_previa.destroy()
 
         self._janela_previa = JanelaPrevisualizacao(self._raiz, reproducao)
+
+    def _alternar_direcao_livre(self, palavra: str, livre: bool) -> None:
+        try:
+            self._status.set(self._controlador.marcar_direcao_livre(palavra, livre))
+        except ErroAplicacao as erro:
+            self._tratar_erro(erro, "Não foi possível mudar a direção livre")
+        self._atualizar_sinais()
 
     def _apagar_sinal(self, palavra: str) -> None:
         try:
@@ -2169,16 +2196,8 @@ class JanelaPrincipal:
         except (ValueError, TypeError, IndexError):
             cor_bgr = cor
 
-        cv2.putText(
-            quadro,
-            texto,
-            (20, 42),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
-            cor_bgr,
-            2,
-            cv2.LINE_AA,
-        )
+        # Com acentos ("avião"): o cv2.putText escreveria "avi??o".
+        escrever_texto(quadro, texto, (20, 42), cor_bgr)
 
     def _mostrar(self, quadro) -> None:
         """Adapta a imagem da câmera ao espaço disponível, sem distorção."""

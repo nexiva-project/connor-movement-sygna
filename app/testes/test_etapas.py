@@ -1,6 +1,6 @@
 """Testes das etapas de uma gravação (pré-sinal uma vez, sinal em 3 ritmos)."""
 
-from kara_sygna.aplicacao.etapas import montar_etapas, sem_acentos
+from kara_sygna.aplicacao.etapas import montar_etapas
 from kara_sygna.dados.repositorio import TIPO_PRE, TIPO_SINAL
 
 
@@ -16,10 +16,10 @@ def test_pre_sinal_uma_vez_e_sinal_em_tres_ritmos():
     assert all(e.pre_sinal == "S" for e in etapas[1:]) and etapas[0].pre_sinal == ""
     assert all(e.duracao == 10 for e in etapas)
     assert [e.legenda_video for e in etapas] == [
-        "PRE-SINAL S",
+        "PRÉ-SINAL S",
         "carro 1/3: DEVAGAR",
-        "carro 2/3: MEDIO",
-        "carro 3/3: RAPIDO",
+        "carro 2/3: MÉDIO",
+        "carro 3/3: RÁPIDO",
     ]
 
 
@@ -36,5 +36,5 @@ def test_uma_vez_so_grava_ate_parar():
     assert etapas[0].legenda == "oi 1/1"
 
 
-def test_sem_acentos():
-    assert sem_acentos("médio rápido pré") == "medio rapido pre"
+def test_legenda_do_video_mantem_os_acentos_do_sinal():
+    assert montar_etapas("avião")[0].legenda_video == "avião 1/3: DEVAGAR"

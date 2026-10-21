@@ -20,6 +20,7 @@ Formato: uma linha por quadro da câmera, com as colunas ``rotulo``, ``rodada``,
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import os
 import time
@@ -82,8 +83,9 @@ class ConjuntoDados:
             :func:`kara_sygna.ia.sequencia.montar_amostras`.
         y: Vetor (n,) com o rótulo (palavra) de cada linha.
         grupos: Vetor (n,) com a rodada de cada linha.
-        mascarada: Vetor booleano (n,): a linha vem de uma cópia com a mão
-            apagada (:mod:`kara_sygna.ia.mascara`). ``None`` = nenhuma.
+        mascarada: Vetor booleano (n,): a linha vem de uma cópia (mão
+            apagada, :mod:`kara_sygna.ia.mascara`, ou movimento girado de um
+            sinal de direção livre). ``None`` = nenhuma.
     """
 
     X: np.ndarray
@@ -217,8 +219,49 @@ class RepositorioSinais:
         restantes = tabela[~apagar]
         removidas = len(tabela) - len(restantes)
         restantes.to_csv(self.caminho, index=False, encoding="utf-8")
+        if tipo == TIPO_SINAL and rotulo in self.sinais_direcao_livre():
+            self.marcar_direcao_livre(rotulo, False)
         logger.info("Sinal apagado: %s (%d linhas)", rotulo, removidas)
         return removidas
+
+    # -- direção livre ------------------------------------------------------
+
+    @property
+    def caminho_direcao_livre(self) -> Path:
+        """JSON, ao lado do CSV, com os sinais de direção livre."""
+        return self.caminho.with_name(f"{self.caminho.stem}_direcao_livre.json")
+
+    def sinais_direcao_livre(self) -> set[str]:
+        """Sinais em que o movimento pode ir para qualquer lado (ex.: "avião").
+
+        A forma da mão é sempre a mesma, mas cada pessoa leva a mão para um
+        lado (frente, esquerda, cima...). No treino, o movimento deles entra
+        girado em várias direções (:func:`kara_sygna.ia.sequencia.girar_movimento`).
+        """
+        try:
+            with open(self.caminho_direcao_livre, encoding="utf-8") as arquivo:
+                return {str(s) for s in json.load(arquivo)}
+        except FileNotFoundError:
+            return set()
+        except (OSError, ValueError, TypeError) as erro:
+            logger.warning("Lista de direção livre ilegível (%s); ignorada.", erro)
+            return set()
+
+    def marcar_direcao_livre(self, rotulo: str, livre: bool) -> None:
+        """Liga ou desliga a direção livre de um sinal.
+
+        O CSV ganha a data de agora: a IA aparece como "precisa treinar".
+        """
+        sinais = self.sinais_direcao_livre()
+        if (rotulo in sinais) == livre:
+            return
+        sinais = sinais | {rotulo} if livre else sinais - {rotulo}
+        self.caminho_direcao_livre.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.caminho_direcao_livre, "w", encoding="utf-8") as arquivo:
+            json.dump(sorted(sinais), arquivo, ensure_ascii=False, indent=1)
+        if self.caminho.exists():
+            os.utime(self.caminho)
+        logger.info("Direção livre %s: %s", "ligada" if livre else "desligada", rotulo)
 
     # -- leitura ------------------------------------------------------------
 
@@ -308,6 +351,30 @@ class RepositorioSinais:
         tabela = tabela[tabela[COLUNA_TIPO] == tipo]
         contagem = tabela[COLUNA_ROTULO].value_counts().sort_index()
         return {str(palavra): int(qtd) for palavra, qtd in contagem.items()}
+
+    def tamanho_por_sinal(self, tipo: str = TIPO_SINAL) -> dict[str, int]:
+        """Quantos bytes cada sinal (ou pré-sinal) ocupa no CSV.
+
+        Todos os sinais ficam no mesmo arquivo: é a soma das linhas de cada um.
+
+        Returns:
+            Dicionário ``{palavra: bytes}``; vazio se não houver dados.
+        """
+        if not self.existe():
+            return {}
+        tamanhos: dict[str, int] = {}
+        with open(self.caminho, "rb") as arquivo:
+            nomes = next(csv.reader([arquivo.readline().decode("utf-8-sig")]))
+            i_rotulo, i_tipo = nomes.index(COLUNA_ROTULO), nomes.index(COLUNA_TIPO)
+            for linha in arquivo:
+                campos = next(csv.reader([linha.decode("utf-8")]), [])
+                if len(campos) <= max(i_rotulo, i_tipo) or campos[i_tipo] != tipo:
+                    continue
+                rotulo = campos[i_rotulo]
+                if tipo == TIPO_PRE:
+                    rotulo = nome_pre_sinal(rotulo)
+                tamanhos[rotulo] = tamanhos.get(rotulo, 0) + len(linha)
+        return tamanhos
 
     def exemplos_do_sinal(self, rotulo: str, tipo: str = TIPO_SINAL) -> np.ndarray:
         """Devolve a forma das mãos de um sinal, na ordem em que foi gravado.

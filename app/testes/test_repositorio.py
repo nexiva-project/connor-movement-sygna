@@ -174,3 +174,18 @@ def test_regravar_sem_pre_sinal_tira_o_pre_sinal_antigo(repositorio, rng):
     assert repositorio.pre_sinais_dos_sinais() == {"carro": "S"}
     repositorio.anexar_quadros("carro", 2, _quadros(rng, 2))  # sem pré-sinal
     assert repositorio.pre_sinais_dos_sinais() == {}
+
+
+def test_tamanho_por_sinal_soma_as_linhas_de_cada_sinal(tmp_path):
+    repo = RepositorioSinais(tmp_path / "dados.csv")
+    vetor = np.zeros(TOTAL_FEATURES_QUADRO)
+    repo.anexar_quadros("carro", 1, [(i, vetor) for i in range(3)])
+    repo.anexar_quadros("casa", 2, [(0, vetor)])
+    repo.anexar_quadros("S", 3, [(0, vetor)], tipo=TIPO_PRE)
+    tamanhos = repo.tamanho_por_sinal()
+    assert set(tamanhos) == {"carro", "casa"}
+    linhas = (tmp_path / "dados.csv").read_bytes().splitlines(keepends=True)[1:]
+    pre = repo.tamanho_por_sinal(TIPO_PRE)
+    assert sum(tamanhos.values()) + sum(pre.values()) == sum(len(x) for x in linhas)
+    assert tamanhos["carro"] > 2 * tamanhos["casa"]
+    assert set(repo.tamanho_por_sinal(TIPO_PRE)) == {"S"}

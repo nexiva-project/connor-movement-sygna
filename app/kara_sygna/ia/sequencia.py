@@ -17,6 +17,7 @@ aumento de dados de :mod:`kara_sygna.ia.aumento` continua valendo.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable
 from functools import lru_cache
 
 import numpy as np
@@ -189,12 +190,44 @@ def mudar_velocidade(quadros: np.ndarray, fator: float) -> np.ndarray:
     return quadros[np.clip(indices, 0, len(quadros) - 1)]
 
 
+def girar_movimento(quadros: np.ndarray, graus: float) -> np.ndarray:
+    """Refaz uma gravação com o movimento indo para outro lado.
+
+    Para sinais de direção livre (ex.: "avião"): o caminho do pulso (pelo
+    braço, de onde sai o movimento da janela) gira em volta do ponto médio
+    dele na gravação. A forma da mão fica igual.
+
+    Args:
+        quadros: Matriz (n, 223), em ordem de gravação.
+        graus: Quanto girar (sentido anti-horário na imagem).
+
+    Returns:
+        Nova matriz; quadros sem corpo ficam como estão.
+    """
+    girados = np.array(quadros, dtype=np.float64).reshape(-1, TOTAL_FEATURES_QUADRO)
+    corpo = girados[:, COLUNA_CORPO_PRESENTE] > 0.5
+    if not corpo.any():
+        return girados
+    angulo = np.radians(graus)
+    # y da imagem cresce para baixo: o sinal de seno deixa o giro anti-horário.
+    rotacao = np.array(
+        [[np.cos(angulo), np.sin(angulo)], [-np.sin(angulo), np.cos(angulo)]]
+    )
+    for lado in _LADOS:
+        colunas = list(COLUNAS_PULSO_BRACO[lado])
+        pulsos = girados[np.ix_(corpo, colunas)]
+        centro = pulsos.mean(axis=0)
+        girados[np.ix_(corpo, colunas)] = (pulsos - centro) @ rotacao.T + centro
+    return girados
+
+
 def montar_amostras(
     dados: ConjuntoDados,
     tamanho: int = config.QUADROS_POR_JANELA,
     passo: int = config.PASSO_JANELA_TREINO,
     velocidades: tuple[float, ...] = config.VELOCIDADES_TREINO,
     mascara: tuple[float, ...] | None = None,
+    direcao_livre: Iterable[str] = (),
 ) -> ConjuntoDados:
     """Transforma os quadros gravados nas amostras (janelas) do treino.
 
@@ -203,12 +236,15 @@ def montar_amostras(
     outras ``velocidades`` (mais rápida e mais devagar), para o sinal ser
     reconhecido no ritmo de cada um. Com ``config.MASCARA_FRACOES``, também
     entram cópias com a mão sumindo (:mod:`kara_sygna.ia.mascara`). As cópias
-    ficam no mesmo grupo da original, então nunca vazam para o teste.
+    ficam no mesmo grupo da original, então nunca vazam para o teste. Os
+    sinais de ``direcao_livre`` também entram com o movimento girado nos
+    ``config.ANGULOS_DIRECAO_LIVRE`` (:func:`girar_movimento`).
 
     Args:
         dados: Quadros do CSV, com a rodada de cada um, em ordem de gravação.
         mascara: Partes da mão apagadas nas cópias. ``None`` =
             ``config.MASCARA_FRACOES``; ``()`` = sem cópias.
+        direcao_livre: Sinais em que o movimento pode ir para qualquer lado.
 
     Returns:
         ``ConjuntoDados`` com ``X`` de ``total_features_janela()`` colunas e
@@ -227,6 +263,7 @@ def montar_amostras(
     y: list[str] = []
     grupos: list = []
     mascarada: list[bool] = []
+    livres = set(direcao_livre)
     for rodada in dict.fromkeys(dados.grupos.tolist()):
         da_rodada = dados.grupos == rodada
         rotulos = dados.y[da_rodada]
@@ -238,6 +275,16 @@ def montar_amostras(
             fatores = (1.0, *velocidades) if len(sequencia) >= tamanho else (1.0,)
             # Cópias com a mão sumindo (máscara), cada uma como uma gravação.
             copias = copias_mascaradas(sequencia, int(rodada) % 2**32, fracoes)
+            # Direção livre: o movimento girado, cada um como uma gravação.
+            if rotulo in livres:
+                copias = [
+                    *(
+                        girar_movimento(sequencia, g)
+                        for g in config.ANGULOS_DIRECAO_LIVRE
+                    ),
+                    *copias,
+                ]
+            # As cópias (numero > 0) ficam fora do teste da validação.
             for numero, original in enumerate([sequencia, *copias]):
                 for espelho in (original, espelhar_quadros(original)):
                     for fator in dict.fromkeys(fatores):

@@ -100,6 +100,8 @@ class InfoSinal:
         treinado: Se a IA atual já conhece este sinal.
         pre_sinal: Para um sinal, o pré-sinal que vem antes dele ("" se nenhum).
         eh_pre_sinal: ``True`` se a linha é um pré-sinal.
+        tamanho: Bytes que as gravações dele ocupam no CSV.
+        direcao_livre: O movimento pode ir para qualquer lado (ex.: "avião").
     """
 
     palavra: str
@@ -107,6 +109,8 @@ class InfoSinal:
     treinado: bool
     pre_sinal: str = ""
     eh_pre_sinal: bool = False
+    tamanho: int = 0
+    direcao_livre: bool = False
 
     @property
     def chave(self) -> str:
@@ -269,6 +273,7 @@ class ControladorSinais:
             dados,
             self.caminho_modelo,
             progresso,
+            self.repositorio.sinais_direcao_livre(),
         )
         progresso("Treinando os pré-sinais...")
         treinar_pre_sinais(
@@ -645,16 +650,39 @@ class ControladorSinais:
             set(nomes_dos_pre_sinais(self.caminho_modelo_pre)) if atualizado else set()
         )
         pre_dos_sinais = self.repositorio.pre_sinais_dos_sinais()
+        tamanhos = self.repositorio.tamanho_por_sinal()
+        tamanhos_pre = self.repositorio.tamanho_por_sinal(TIPO_PRE)
+        livres = self.repositorio.sinais_direcao_livre()
 
         return [
-            InfoSinal(nome, qtd, nome in pre_conhecidos, eh_pre_sinal=True)
+            InfoSinal(
+                nome,
+                qtd,
+                nome in pre_conhecidos,
+                eh_pre_sinal=True,
+                tamanho=tamanhos_pre.get(nome, 0),
+            )
             for nome, qtd in contagem_pre.items()
         ] + [
             InfoSinal(
-                palavra, qtd, palavra in conhecidos, pre_dos_sinais.get(palavra, "")
+                palavra,
+                qtd,
+                palavra in conhecidos,
+                pre_dos_sinais.get(palavra, ""),
+                tamanho=tamanhos.get(palavra, 0),
+                direcao_livre=palavra in livres,
             )
             for palavra, qtd in contagem.items()
         ]
+
+    def marcar_direcao_livre(self, palavra: str, livre: bool) -> str:
+        """Liga ou desliga a direção livre de um sinal (vale no próximo treino)."""
+        palavra = palavra.strip().lower()
+        if not palavra or palavra.startswith(PREFIXO_PRE):
+            raise PalavraInvalidaError("Direção livre só vale para sinais.")
+        self.repositorio.marcar_direcao_livre(palavra, livre)
+        estado = "ligada" if livre else "desligada"
+        return f"Direção livre {estado} em “{palavra}”. Treine a IA para valer."
 
     def apagar_sinal(self, chave: str) -> str:
         """Apaga um sinal (ou um pré-sinal, ``"pre:S"``) e remove a IA treinada."""

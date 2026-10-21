@@ -15,20 +15,10 @@ sem ritmo.
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass
 
 from kara_sygna import config
 from kara_sygna.dados.repositorio import TIPO_PRE, TIPO_SINAL
-
-
-def sem_acentos(texto: str) -> str:
-    """Tira os acentos (o OpenCV não desenha acentos sobre a câmera)."""
-    return "".join(
-        c
-        for c in unicodedata.normalize("NFD", texto)
-        if unicodedata.category(c) != "Mn"
-    )
 
 
 @dataclass(frozen=True)
@@ -51,11 +41,15 @@ class Etapa:
 
     @property
     def legenda_video(self) -> str:
-        """Texto da etapa sobre a câmera (maiúsculas no ritmo, sem acentos)."""
+        """Texto da etapa sobre a câmera (maiúsculas no ritmo, com acentos).
+
+        Os acentos aparecem: o texto é desenhado com uma fonte de verdade
+        (:mod:`kara_sygna.interface.texto_video`).
+        """
         if self.tipo == TIPO_PRE:
-            return sem_acentos(f"PRE-SINAL {self.nome}")
+            return f"PRÉ-SINAL {self.nome}"
         nome, _, ritmo = self.legenda.partition(": ")
-        return sem_acentos(f"{nome}: {ritmo.upper()}" if ritmo else nome)
+        return f"{nome}: {ritmo.upper()}" if ritmo else nome
 
 
 def montar_etapas(
