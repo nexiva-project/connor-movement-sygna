@@ -31,7 +31,7 @@ from kara_sygna.dados.repositorio import (
     novo_id_rodada,
     remover_arquivo_se_existir,
 )
-from kara_sygna.ia import treinamento
+from kara_sygna.ia import tipos_ia, treinamento
 from kara_sygna.ia.modelo_io import (
     carregar_modelo,
     classes_do_modelo,
@@ -131,13 +131,24 @@ class ControladorSinais:
     def __init__(
         self,
         repositorio: RepositorioSinais | None = None,
-        caminho_modelo: Path = config.ARQUIVO_MODELO,
+        caminho_modelo: Path | None = None,
         carregador_modelo: Callable[[Path], Any] = carregar_modelo,
         relogio: Callable[[], float] = time.monotonic,
     ) -> None:
         self.repositorio = repositorio or RepositorioSinais()
-        self.caminho_modelo = Path(caminho_modelo)
-        self.caminho_modelo_pre = caminho_modelo_pre(self.caminho_modelo)
+        # Padrão: a IA escolhida na janela de escolha (RandomForest ou rede).
+        self.caminho_modelo = Path(
+            caminho_modelo
+            if caminho_modelo is not None
+            else tipos_ia.caminho_modelo(tipos_ia.tipo_escolhido())
+        )
+        # A IA de pré-sinais é sempre um RandomForest, a mesma para todas as IAs
+        # (a de uma rede neural fica ao lado do modelo_sinais.pkl).
+        self.caminho_modelo_pre = caminho_modelo_pre(
+            self.caminho_modelo.with_name(config.ARQUIVO_MODELO.name)
+            if self.caminho_modelo.suffix == ".pt"
+            else self.caminho_modelo
+        )
         self._carregador_modelo = carregador_modelo
         self._relogio = relogio
         self.estabilizador = Estabilizador(
@@ -180,7 +191,11 @@ class ControladorSinais:
     # -- ensino ----------------------------------------------------------------
 
     def iniciar_ensino(
-        self, palavra: str, tipo: str = TIPO_SINAL, pre_sinal: str = ""
+        self,
+        palavra: str,
+        tipo: str = TIPO_SINAL,
+        pre_sinal: str = "",
+        todos_quadros: bool = False,
     ) -> str:
         """Começa a gravar exemplos de um sinal ou de um pré-sinal.
 
@@ -188,6 +203,10 @@ class ControladorSinais:
             palavra: Nome do sinal (ou do pré-sinal, se ``tipo`` for ``TIPO_PRE``).
             tipo: ``TIPO_SINAL`` ou ``TIPO_PRE``.
             pre_sinal: Para um sinal, o pré-sinal que vem antes dele.
+            todos_quadros: Grava todos os quadros, mesmo com a mão parada. Sem
+                isso, o filtro de quadros (``config.MODO_QUADROS``) só grava a
+                mão parada a cada ``PARADO_USAR_A_CADA_S``: uma letra parada
+                de 3 s virava ~6 quadros em vez de ~90.
         """
         # Sinais em minúsculas; pré-sinais em maiúsculas ("s" e "S" são o mesmo).
         palavra = (
@@ -212,7 +231,11 @@ class ControladorSinais:
         self._rodada = novo_id_rodada()
         self._pendentes = []
         self._lacuna = []
-        self.filtro_quadros = FiltroQuadros()  # lê o modo atual do config
+        self.filtro_quadros = (
+            FiltroQuadros(modo="fixo", a_cada=1)  # todos, mude a mão ou não
+            if todos_quadros
+            else FiltroQuadros()  # lê o modo atual do config
+        )
         self.qualidade = QualidadeGravacao(tipo, palavra)
         self.modo = Modo.ENSINANDO
 
@@ -338,7 +361,8 @@ class ControladorSinais:
         self.modo = Modo.RECONHECENDO
 
         logger.info(
-            "Reconhecimento iniciado. Sinais do modelo: %s. Pré-sinais: %s",
+            "Reconhecimento iniciado (IA: %s). Sinais do modelo: %s. Pré-sinais: %s",
+            tipos_ia.tipo_do_caminho(self.caminho_modelo),
             list(self._modelo.classes_),
             self._pre.sinal_para_pre if self._pre else "nenhum",
         )
@@ -586,7 +610,13 @@ class ControladorSinais:
             self._diag["motivo"] = "preparando"
             return ResultadoQuadro("PREPARANDO..."), None
 
-        predicao = prever(self._modelo, self.buffer.features())
+        # Redes neurais leem a janela quadro a quadro; o RandomForest, o resumo.
+        entrada = (
+            self.buffer.sequencia()
+            if getattr(self._modelo, "usa_sequencia", False)
+            else self.buffer.features()
+        )
+        predicao = prever(self._modelo, entrada)
         # Limite de cada sinal: o pré-sinal visto deixa os sinais dele mais
         # fáceis; sem ele, o sinal precisa de um pouco mais de certeza.
         limite = self._limite_do_sinal(predicao.sinal)

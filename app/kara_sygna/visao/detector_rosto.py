@@ -14,6 +14,8 @@ from typing import Any, Self
 import cv2
 import numpy as np
 
+from kara_sygna import config
+
 logger = logging.getLogger(__name__)
 
 PONTOS_ROSTO = 468  # tamanho da malha que o MediaPipe devolve (não muda)
@@ -284,6 +286,11 @@ class DetectorRosto:
             or quadro_bgr.size == 0
         ):
             raise ValueError("quadro_bgr precisa ser uma imagem BGR válida.")
+
+        if not config.ROSTO_E_CORPO:
+            return ResultadoRosto(
+                landmarks=None, vetor=self.vetor_zeros(), presente=False
+            )
 
         altura, largura = quadro_bgr.shape[:2]
         quadro_rgb = cv2.cvtColor(quadro_bgr, cv2.COLOR_BGR2RGB)

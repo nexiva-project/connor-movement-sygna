@@ -180,6 +180,19 @@ def indices_dos_slots(resultado: Any) -> dict[str, int | None]:
     return slots
 
 
+def lado_de_cada_indice(resultado: Any) -> dict[int, str]:
+    """O contrário de :func:`indices_dos_slots`: ``{índice da mão: lado}``.
+
+    Para guardar o histórico de cada mão pelo lado (desenho, anti-pulo), e não
+    pela ordem na lista, que pode trocar de um quadro para o outro.
+    """
+    return {
+        indice: lado
+        for lado, indice in indices_dos_slots(resultado).items()
+        if indice is not None
+    }
+
+
 def separar_maos(resultado: Any) -> dict[str, np.ndarray | None]:
     """Distribui as mãos detectadas nos "slots" esquerda e direita.
 

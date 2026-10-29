@@ -323,8 +323,11 @@ class RepositorioSinais:
     def pre_sinais_dos_sinais(self) -> dict[str, str]:
         """Qual pré-sinal vem antes de cada sinal que tem um.
 
-        Se um sinal foi gravado com pré-sinais diferentes, vale o da gravação
-        mais recente.
+        O pré-sinal é a forma da mão do sinal (o carro é feito com as mãos em
+        S), então ele fica: uma gravação feita SEM o botão Pré-sinal não o
+        apaga (em 24/10/2026, regravar o carro sem o botão tirou o S do carro).
+        Se o sinal foi gravado com pré-sinais diferentes, vale o da gravação
+        mais recente que tem um.
 
         Returns:
             ``{sinal: pre_sinal}``, só com os sinais que têm pré-sinal.
@@ -332,12 +335,11 @@ class RepositorioSinais:
         if not self.existe():
             return {}
         tabela = self._ler_tabela()
-        tabela = tabela[tabela[COLUNA_TIPO] == TIPO_SINAL].sort_values(
-            COLUNA_RODADA, kind="stable"
-        )
-        # A gravação mais recente vale, inclusive se foi SEM pré-sinal.
+        tabela = tabela[
+            (tabela[COLUNA_TIPO] == TIPO_SINAL) & (tabela[COLUNA_PRE_SINAL] != "")
+        ].sort_values(COLUNA_RODADA, kind="stable")
         ultimo = dict(zip(tabela[COLUNA_ROTULO], tabela[COLUNA_PRE_SINAL], strict=True))
-        return {str(sinal): str(pre) for sinal, pre in ultimo.items() if pre}
+        return {str(sinal): str(pre) for sinal, pre in ultimo.items()}
 
     def contagem_por_sinal(self, tipo: str = TIPO_SINAL) -> dict[str, int]:
         """Quantos exemplos existem de cada sinal (ou pré-sinal), em ordem alfabética.

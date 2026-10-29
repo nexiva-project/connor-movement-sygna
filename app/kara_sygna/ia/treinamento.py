@@ -20,9 +20,14 @@ from sklearn.model_selection import StratifiedGroupKFold
 
 from kara_sygna import config
 from kara_sygna.dados.repositorio import ConjuntoDados
+from kara_sygna.ia import tipos_ia
 from kara_sygna.ia.aumento import expandir_treino, numero_de_variantes
 from kara_sygna.ia.modelo_io import salvar_modelo
-from kara_sygna.ia.sequencia import montar_amostras, nomes_features_janela
+from kara_sygna.ia.sequencia import (
+    montar_amostras,
+    nomes_features_janela,
+    sequencias_de_uma_gravacao,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +162,14 @@ def treinar(
     if len(dados) == 0:
         raise TreinoImpossivelError("O CSV está vazio. Ensine pelo menos um sinal.")
     progresso("Montando as sequências de quadros...")
-    dados = montar_amostras(dados, direcao_livre=direcao_livre)
+    tipo = tipos_ia.tipo_do_caminho(caminho_modelo)
+    if tipo != tipos_ia.RANDOMFOREST:
+        # Rede neural (arquivo .pt): a janela vai quadro a quadro.
+        dados = montar_amostras(
+            dados, direcao_livre=direcao_livre, extrair=sequencias_de_uma_gravacao
+        )
+    else:
+        dados = montar_amostras(dados, direcao_livre=direcao_livre)
     if len(dados) == 0:
         raise TreinoImpossivelError(
             "As gravações são curtas demais ou não mostram as mãos. Grave cada "
@@ -167,11 +179,17 @@ def treinar(
 
     rodadas = len(set(dados.grupos.tolist()))
     progresso(f"{len(dados)} exemplos, {len(classes)} sinais, {rodadas} rodadas.")
-    acuracia, relatorio = avaliar(dados, progresso)
+    if tipo != tipos_ia.RANDOMFOREST:
+        from kara_sygna.ia.redes import salvar_rede, treinar_rede
 
-    progresso("Treinando o modelo final...")
-    modelo = _ajustar(dados.X, dados.y)
-    salvar_modelo(modelo, caminho_modelo)
+        rede, acuracia = treinar_rede(tipo, dados, progresso)
+        salvar_rede(rede, caminho_modelo)
+        relatorio = ""
+    else:
+        acuracia, relatorio = avaliar(dados, progresso)
+        progresso("Treinando o modelo final...")
+        modelo = _ajustar(dados.X, dados.y)
+        salvar_modelo(modelo, caminho_modelo)
 
     resultado = ResultadoTreino(len(dados), classes, rodadas, acuracia, relatorio)
     _salvar_resumo(resultado, Path(caminho_modelo).with_suffix(".json"))

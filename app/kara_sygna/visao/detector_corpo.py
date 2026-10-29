@@ -102,6 +102,9 @@ def criar_detector_corpo() -> DetectorCorpo | SemCorpo:
     pasta de instalação. Sem internet, ou sem permissão de escrita nessa
     pasta, isso falha; antes o app inteiro deixava de abrir.
     """
+    if not config.ROSTO_E_CORPO:
+        logger.info("Pose desligado (config.ROSTO_E_CORPO = False).")
+        return SemCorpo()
     try:
         return DetectorCorpo()
     except Exception:

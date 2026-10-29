@@ -20,6 +20,9 @@ from dataclasses import dataclass
 from kara_sygna import config
 from kara_sygna.dados.repositorio import TIPO_PRE, TIPO_SINAL
 
+#: Com o botão "Ritmos" desligado: o sinal é gravado uma vez só, normal.
+RITMO_NORMAL = ("normal",)
+
 
 @dataclass(frozen=True)
 class Etapa:

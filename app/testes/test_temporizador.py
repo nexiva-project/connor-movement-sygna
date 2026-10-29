@@ -60,3 +60,17 @@ def test_cancelar_na_contagem_nao_comeca(relogio):
     t.cancelar()
     relogio.agora = 10
     assert t.atualizar() is Evento.NADA and t.fase is Fase.PARADO
+
+
+def test_contagem_curta_so_desta_vez():
+    """Gravação rápida: entre uma gravação e outra, a espera é mais curta."""
+    relogio = Relogio()
+    t = TemporizadorEnsino(contagem_s=3, relogio=relogio)
+    t.iniciar(2, contagem_s=1)
+    assert t.segundos_restantes() == 1
+    relogio.agora = 1.0
+    assert t.atualizar() is Evento.COMECAR
+    relogio.agora = 3.0
+    assert t.atualizar() is Evento.PARAR
+    t.iniciar(2)  # a próxima sem contagem própria volta aos 3 s
+    assert t.segundos_restantes() == 3

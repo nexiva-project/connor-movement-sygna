@@ -17,7 +17,7 @@ aumento de dados de :mod:`kara_sygna.ia.aumento` continua valendo.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import lru_cache
 
 import numpy as np
@@ -29,6 +29,7 @@ from kara_sygna.visao.quadro import (
     COLUNA_CORPO_PRESENTE,
     COLUNAS_PULSO_BRACO,
     IDX_FORMA,
+    IDX_MAOS,
     TOTAL_FEATURES_QUADRO,
     colunas_de_lugar,
     espelhar_quadros,
@@ -170,6 +171,54 @@ def janelas_de_uma_gravacao(
     )
 
 
+#: Valores por quadro na sequência das redes neurais: forma das duas mãos
+#: (126), presença de cada mão (2) e pulsos pelo braço em relação ao último
+#: quadro da janela (4).
+TOTAL_FEATURES_SEQUENCIA = IDX_MAOS.stop + 2 + 4
+
+
+def features_sequencia(janela: np.ndarray) -> np.ndarray:
+    """A janela quadro a quadro, para as redes neurais (GRU, LSTM, Conv1D).
+
+    O RandomForest recebe um resumo da janela (:func:`features_janela`); as
+    redes leem os quadros em ordem e aprendem o movimento sozinhas. Como no
+    resumo, o lugar do sinal fica de fora: o pulso entra em relação a onde
+    ele está no último quadro (o caminho, não o lugar).
+
+    Returns:
+        Matriz (n, ``TOTAL_FEATURES_SEQUENCIA``).
+    """
+    janela = np.asarray(janela, dtype=np.float64).reshape(-1, TOTAL_FEATURES_QUADRO)
+    corpo = janela[:, COLUNA_CORPO_PRESENTE] > 0.5
+    partes = [janela[:, IDX_MAOS], maos_presentes(janela).astype(np.float64)]
+    for lado in _LADOS:
+        posicoes = _preencher(janela[:, list(COLUNAS_PULSO_BRACO[lado])], corpo)
+        partes.append(
+            np.zeros((len(janela), 2)) if posicoes is None else posicoes - posicoes[-1]
+        )
+    return np.concatenate(partes, axis=1)
+
+
+def sequencias_de_uma_gravacao(
+    quadros: np.ndarray,
+    tamanho: int = config.QUADROS_POR_JANELA,
+    passo: int = config.PASSO_JANELA_TREINO,
+) -> np.ndarray:
+    """Como :func:`janelas_de_uma_gravacao`, mas quadro a quadro (redes neurais).
+
+    Returns:
+        Matriz (m, ``tamanho``, ``TOTAL_FEATURES_SEQUENCIA``).
+    """
+    quadros = np.asarray(quadros, dtype=np.float64).reshape(-1, TOTAL_FEATURES_QUADRO)
+    com_mao = maos_presentes(quadros).any(axis=1)
+    fins = [fim for fim in range(tamanho - 1, len(quadros), passo) if com_mao[fim]]
+    if not fins:
+        return np.empty((0, tamanho, TOTAL_FEATURES_SEQUENCIA))
+    return np.array(
+        [features_sequencia(quadros[fim - tamanho + 1 : fim + 1]) for fim in fins]
+    )
+
+
 def mudar_velocidade(quadros: np.ndarray, fator: float) -> np.ndarray:
     """Refaz uma gravação como se o sinal fosse feito mais rápido ou devagar.
 
@@ -228,6 +277,7 @@ def montar_amostras(
     velocidades: tuple[float, ...] = config.VELOCIDADES_TREINO,
     mascara: tuple[float, ...] | None = None,
     direcao_livre: Iterable[str] = (),
+    extrair: Callable[[np.ndarray, int, int], np.ndarray] = janelas_de_uma_gravacao,
 ) -> ConjuntoDados:
     """Transforma os quadros gravados nas amostras (janelas) do treino.
 
@@ -245,10 +295,13 @@ def montar_amostras(
         mascara: Partes da mão apagadas nas cópias. ``None`` =
             ``config.MASCARA_FRACOES``; ``()`` = sem cópias.
         direcao_livre: Sinais em que o movimento pode ir para qualquer lado.
+        extrair: Como cortar cada gravação: :func:`janelas_de_uma_gravacao`
+            (RandomForest) ou :func:`sequencias_de_uma_gravacao` (redes).
 
     Returns:
-        ``ConjuntoDados`` com ``X`` de ``total_features_janela()`` colunas e
-        ``mascarada`` dizendo quais linhas vêm das cópias.
+        ``ConjuntoDados`` com ``X`` de ``total_features_janela()`` colunas (ou
+        as sequências, com ``extrair``) e ``mascarada`` dizendo quais linhas
+        vêm das cópias.
     """
     if mascara is not None:
         fracoes = mascara
@@ -289,13 +342,14 @@ def montar_amostras(
                 for espelho in (original, espelhar_quadros(original)):
                     for fator in dict.fromkeys(fatores):
                         versao = mudar_velocidade(espelho, fator)
-                        janelas = janelas_de_uma_gravacao(versao, tamanho, passo)
+                        janelas = extrair(versao, tamanho, passo)
                         X.append(janelas)
                         y += [rotulo] * len(janelas)
                         grupos += [rodada] * len(janelas)
                         mascarada += [numero > 0] * len(janelas)
 
-    matriz = np.vstack(X) if X else np.empty((0, total_features_janela()))
+    vazio = extrair(np.empty((0, TOTAL_FEATURES_QUADRO)), tamanho, passo)
+    matriz = np.concatenate(X) if X else vazio
     return ConjuntoDados(
         matriz,
         np.asarray(y, dtype=str),
@@ -337,3 +391,7 @@ class BufferQuadros:
     def features(self) -> np.ndarray:
         """Vetor da janela atual (veja :func:`features_janela`)."""
         return features_janela(np.array(self._quadros))
+
+    def sequencia(self) -> np.ndarray:
+        """A janela atual quadro a quadro, para as redes neurais."""
+        return features_sequencia(np.array(self._quadros))

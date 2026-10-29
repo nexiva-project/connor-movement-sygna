@@ -74,6 +74,8 @@ def carregar_modelo(caminho: Path) -> Any:
     caminho = Path(caminho)
     if not caminho.exists():
         raise FileNotFoundError(f"Modelo não encontrado: {caminho}")
+    if caminho.suffix == ".pt":
+        return _carregar_rede(caminho)
     modelo = joblib.load(caminho)
     validar_modelo(modelo)
     if hasattr(modelo, "n_jobs"):
@@ -95,6 +97,27 @@ def modelo_esta_atualizado(caminho_modelo: Path, caminho_csv: Path) -> bool:
 #: depois de cada etapa do ensino, e carregar o modelo inteiro a cada vez
 #: travava a interface.
 _classes_em_cache: dict[Path, tuple[float, set[str]]] = {}
+
+
+def _carregar_rede(caminho: Path) -> Any:
+    """Carrega uma rede neural (GRU, LSTM, Conv1D; precisa do PyTorch)."""
+    from kara_sygna.ia.sequencia import TOTAL_FEATURES_SEQUENCIA
+
+    try:
+        from kara_sygna.ia.redes import carregar_rede
+    except ImportError as erro:
+        raise ModeloInvalidoError(
+            "Esta IA é uma rede neural e precisa do PyTorch (pip install torch)."
+        ) from erro
+    try:
+        modelo = carregar_rede(caminho)
+    except (KeyError, RuntimeError, ValueError) as erro:
+        raise ModeloInvalidoError(f"Rede neural inválida: {erro}") from erro
+    if modelo.n_entradas != TOTAL_FEATURES_SEQUENCIA:  # rede ou comitê de redes
+        raise ModeloInvalidoError(
+            "A rede foi treinada com outros valores por quadro. Treine a IA de novo."
+        )
+    return modelo
 
 
 def classes_do_modelo(caminho_modelo: Path) -> set[str]:

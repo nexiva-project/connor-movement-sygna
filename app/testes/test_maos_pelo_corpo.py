@@ -106,6 +106,32 @@ def test_mao_real_com_pulso_do_pose_errado_nao_e_descartada():
     assert conferido.descartadas == 0 and len(conferido.multi_hand_landmarks) == 2
 
 
+def test_copia_da_mao_direita_nao_vira_mao_esquerda():
+    """Letras com a mão direita (24/10/2026): a mão direita saía duas vezes,
+    as duas "Right", e a cópia ia para o lado esquerdo, com o braço esquerdo
+    abaixado fora da imagem (no vídeo, a cópia ficava a ~2,4 ombros dele)."""
+    direita, copia = _mao(0.72, 0.77), _mao(0.68, 0.61)
+    resultado = resultado_falso((copia, "Right"), (direita, "Right"))
+    corpo = _corpo((0.17, 1.45), (0.73, 0.80))
+    conferido = conferir_maos(resultado, corpo, LARGURA, ALTURA)
+    assert conferido.multi_hand_landmarks == [direita]
+    assert conferido.lados == ["dir"] and conferido.descartadas == 1
+    # A cópia também aparece com o rótulo trocado ("Left"): sai do mesmo jeito.
+    resultado = resultado_falso((copia, "Left"), (direita, "Right"))
+    conferido = conferir_maos(resultado, corpo, LARGURA, ALTURA)
+    assert conferido.multi_hand_landmarks == [direita]
+
+
+def test_duas_maos_reais_com_o_mesmo_rotulo_ficam():
+    """Se o MediaPipe erra um rótulo, mas cada mão está perto do seu braço, ficam as duas."""
+    esquerda, direita = _mao(0.30, 0.70), _mao(0.70, 0.70)
+    resultado = resultado_falso((esquerda, "Right"), (direita, "Right"))
+    conferido = conferir_maos(
+        resultado, _corpo((0.31, 0.71), (0.69, 0.71)), LARGURA, ALTURA
+    )
+    assert conferido.descartadas == 0 and sorted(conferido.lados) == ["dir", "esq"]
+
+
 def test_duas_deteccoes_da_mesma_mao_viram_uma():
     mao, quase_igual = _mao(0.40, 0.60), _mao(0.41, 0.61)
     resultado = resultado_falso((mao, "Left"), (quase_igual, "Right"))

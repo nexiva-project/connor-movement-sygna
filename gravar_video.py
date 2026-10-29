@@ -84,6 +84,19 @@ ROTEIROS = [
     Roteiro("outra_pessoa", "carro,casa", "OUTRA pessoa: carro e depois casa", "Outra pessoa"),
     Roteiro("presinal_s", "pre:S", "so o S, girando a mao para varios lados", "Pre-sinal", (("pre", "S", 10.0),)),
     Roteiro("presinal_b", "pre:B", "so o B, girando a mao para varios lados", "Pre-sinal", (("pre", "B", 10.0),)),
+    Roteiro(
+        "letras_mao_direita",
+        "s,b,y",
+        "letras S, B e Y com a mao DIREITA (a esquerda abaixada)",
+        "Letras",
+        (("sinal", "s", 5.0), ("sinal", "b", 5.0), ("sinal", "y", 5.0)),
+    ),
+    Roteiro(
+        "defeito_malha",
+        "",
+        "mostre a mao com o dedo da malha mexendo sozinho (direita, depois esquerda)",
+        "Defeitos",
+    ),
 ]
 
 

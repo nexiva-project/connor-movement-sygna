@@ -51,8 +51,13 @@ def prever(modelo: Any, vetor: Sequence[float]) -> Predicao:
     Returns:
         :class:`Predicao`.
     """
-    matriz = np.asarray(vetor, dtype=np.float64).reshape(1, -1)
-    p = modelo.predict_proba(_preparar_entrada(modelo, matriz))[0]
+    entrada = np.asarray(vetor, dtype=np.float64)
+    if getattr(modelo, "usa_sequencia", False):
+        # Rede neural: a janela quadro a quadro (BufferQuadros.sequencia()).
+        p = modelo.predict_proba(entrada[np.newaxis])[0]
+    else:
+        matriz = entrada.reshape(1, -1)
+        p = modelo.predict_proba(_preparar_entrada(modelo, matriz))[0]
     todas = {str(c): float(v) for c, v in zip(modelo.classes_, p, strict=True)}
     ordem = np.argsort(p)[::-1]
     confianca = float(p[ordem[0]])

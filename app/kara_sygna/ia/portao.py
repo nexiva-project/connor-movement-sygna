@@ -17,8 +17,14 @@ relaxada escreveu 3 vezes em vez de 4, e o carro e a casa ficaram iguais
 Como funciona
 -------------
 * Velocidade = quanto o pulso andou (pelo braço, MediaPipe Pose) em 3 quadros,
-  em larguras de ombro por segundo, a mais rápida das duas mãos, média dos
-  últimos 0,3 s.
+  em larguras de ombro por segundo, a mais rápida das duas mãos, mediana dos
+  últimos 0,3 s. (Era a média: ao vivo, em 26/10/2026, um pulo do pulso do
+  Pose num quadro só abriu o portão com as mãos paradas em S, e o carro
+  saiu. A mediana ignora o pulo; nos vídeos de teste o carro e a casa ficaram
+  iguais e a mão relaxada abriu o portão em 26% dos quadros, antes 37%.)
+* Ao levantar as mãos até a posição (quando elas aparecem), o movimento dos
+  primeiros ``config.PORTAO_SUBIDA_S`` não conta: subir as mãos já em S não é
+  o movimento do carro.
 * Portão ABERTO se a velocidade passou de ``config.PORTAO_MOVIMENTO_LIMITE``
   nos últimos ``config.PORTAO_MOVIMENTO_JANELA_S`` segundos.
 * Sem corpo na imagem (no escuro o Pose some) não dá para medir: fica aberto,
@@ -33,7 +39,11 @@ from collections import deque
 import numpy as np
 
 from kara_sygna import config
-from kara_sygna.visao.quadro import COLUNA_CORPO_PRESENTE, COLUNAS_PULSO_BRACO
+from kara_sygna.visao.quadro import (
+    COLUNA_CORPO_PRESENTE,
+    COLUNAS_PULSO_BRACO,
+    maos_presentes,
+)
 
 _LADOS = ("esq", "dir")
 
@@ -79,6 +89,7 @@ class PortaoMovimento:
         self._pulsos: deque = deque(maxlen=self.passo + 1)
         self._velocidades: deque = deque()
         self._ultimo_movimento = float("-inf")
+        self._maos_desde: float | None = None  # quando as mãos apareceram
         self.velocidade = 0.0
 
     def atualizar(self, vetor: np.ndarray, agora: float) -> bool:
@@ -93,11 +104,19 @@ class PortaoMovimento:
         if vetor[COLUNA_CORPO_PRESENTE] <= 0.5:
             self._pulsos.clear()
             return True  # sem corpo não dá para medir: não bloqueia
+        if not maos_presentes(vetor).any():
+            self._maos_desde = None
+        elif self._maos_desde is None:
+            self._maos_desde = agora
+        subindo = (
+            self._maos_desde is not None
+            and agora - self._maos_desde < config.PORTAO_SUBIDA_S
+        )
         pulsos = np.concatenate(
             [vetor[list(COLUNAS_PULSO_BRACO[lado])] for lado in _LADOS]
         )
         self._pulsos.append((agora, pulsos))
-        if len(self._pulsos) > self.passo:
+        if len(self._pulsos) > self.passo and not subindo:
             (t0, p0), (t1, p1) = self._pulsos[0], self._pulsos[-1]
             d = p1 - p0
             v = max(np.hypot(d[0], d[1]), np.hypot(d[2], d[3])) / max(t1 - t0, 1e-3)
@@ -105,7 +124,7 @@ class PortaoMovimento:
         while self._velocidades and agora - self._velocidades[0][0] > self.media_s:
             self._velocidades.popleft()
         self.velocidade = (
-            float(np.mean([v for _, v in self._velocidades]))
+            float(np.median([v for _, v in self._velocidades]))
             if self._velocidades
             else 0.0
         )

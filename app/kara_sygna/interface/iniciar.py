@@ -537,6 +537,25 @@ def executar() -> int:
         return 1
 
     raiz = tk.Tk()
+    # Antes da tela de carregamento: qual IA vai reconhecer os sinais.
+    from kara_sygna.interface.janela_escolha_ia import escolher_ia
+
+    raiz.withdraw()
+    if not escolher_ia(raiz):
+        raiz.destroy()
+        return 0
+    from kara_sygna import config
+    from kara_sygna.ia import tipos_ia
+
+    config.DETECTOR_MAOS = tipos_ia.detector_escolhido()
+    from kara_sygna.visao.detector_maos import RTMLIB
+
+    if config.DETECTOR_MAOS in RTMLIB or config.DETECTOR_MAOS == "landmarker":
+        # O PoseTracker e o Hand Landmarker seguem a mão de um quadro para o
+        # outro: precisam ver os quadros em sequência, num detector só. (Com 3
+        # Landmarkers em revezamento, cada um via 1 quadro de 3 e dava o seu
+        # próprio palpite do lado: a mão podia trocar de lado quadro a quadro.)
+        config.REVEZAMENTO_DETECTORES = 1
     eventos: queue.Queue[tuple[str, Any]] = queue.Queue()
 
     cancelamento: threading.Event | None = None
@@ -545,6 +564,8 @@ def executar() -> int:
     iniciado = False
 
     tela = _TelaCarregamento(raiz)
+    if not _x11(raiz):
+        raiz.deiconify()  # escondida durante a escolha da IA (no X11, é o mostrar)
     tela.mostrar()
     status, progresso = tela.status, tela.progresso
 

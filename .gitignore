@@ -7,3 +7,9 @@ __pycache__/
 # Backups e cópias de segurança locais
 *.zip
 app_tmp/
+
+# Ambiente Python do laboratório (com PyTorch)
+.venv/
+
+# Modelos baixados (MediaPipe Tasks)
+modelos/

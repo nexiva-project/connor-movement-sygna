@@ -40,6 +40,49 @@ PAUSA_ENTRE_LEITURAS_S = 0.05
 # MediaPipe (detecção das mãos)
 # ---------------------------------------------------------------------------
 MAX_MAOS = 2
+# Qual detector acha as mãos: "hands" (MediaPipe Hands, o de sempre) ou
+# "landmarker" (Hand Landmarker, do MediaPipe Tasks, em teste desde 24/10/2026;
+# no vídeo do dedo escondido ficou parecido com o Hands). Escolhido na janela
+# que abre antes da tela de carregamento.
+DETECTOR_MAOS = "hands"
+# Modelo do Hand Landmarker (hand_landmarker.task, do MediaPipe/Google), na
+# pasta "modelos" do laboratório, ao lado da pasta do app.
+MODELO_HAND_LANDMARKER = RAIZ_PROJETO.parent / "modelos" / "hand_landmarker.task"
+# Núcleos do processador por chamada dos detectores do rtmlib (RTMPose...).
+# Com o padrão do ONNX (todos os 28), o RTMPose levava 128 ms por quadro;
+# com 4, 33 ms; com 8, 26 ms. Com o rtmlib, o app usa um detector só (sem
+# revezamento). Com o RTMW-x (24/10/2026): 8 → 41 ms, 12 → 36 ms, 16 → 33 ms;
+# 12 ainda deixa núcleos para o rosto, o corpo e o treino da IA.
+RTMLIB_NUCLEOS = 12
+# Rodar o rtmlib na placa de vídeo (DirectML: pip install onnxruntime-directml),
+# se houver. No PC do lab (RTX 4070 Ti SUPER, 24/10/2026), o RTMW-x caiu de
+# 37 ms para 9 ms, com os mesmos pontos; então roda em todo quadro. Sem placa,
+# fica na CPU (RTMLIB_NUCLEOS e RTMLIB_A_CADA).
+RTMLIB_PLACA_VIDEO = True
+# O RTMPose procura a mão do zero a cada tantos quadros (PoseTracker); no meio,
+# segue a mão pela posição anterior. E filtro One-Euro nos pontos (corte em
+# Hz, beta). No vídeo do defeito (24/10/2026): quadro a quadro, 26 pulos de
+# dedo; a cada 7 + One-Euro (1,0; 0,01), 3 (o MediaPipe Hands teve 9). A cada
+# 3: os mesmos poucos pulos, e uma mão que entra aparece em até 0,1 s (com 7,
+# até 0,23 s).
+RTMLIB_DETECCAO_A_CADA = 6
+# O modelo do rtmlib roda a cada tantos quadros; no meio, repete as últimas
+# mãos (na CPU, o RTMW-x leva ~36 ms: a cada 2, a tela não fica esperando).
+RTMLIB_A_CADA = 2
+# Filtro mais leve (3,0; 0,05): com (1,0; 0,01) a malha do RTMW-x, a ~9
+# quadros/s, ficava atrasada (em 28% dos quadros, a mais de meia palma da mão).
+RTMLIB_EURO_CORTE = 3.0
+RTMLIB_EURO_BETA = 0.05
+# Na placa de vídeo o RTMW-x roda em todo quadro, então dá para filtrar mais
+# forte, mas separado: o pulso leve (a mão acompanha o movimento rápido) e a
+# forma dos dedos (cada dedo menos o pulso) forte. Estudo de 24/10/2026 no
+# vídeo do defeito, contra o filtro único (3,0; 0,05): pulos de dedo de 15
+# para 3, tremida (aceleração dos dedos) 2,1 vezes menor e o pulso até mais
+# perto da mão (no pior quadro, 0,07 palma atrás, antes 0,10). Um filtro único
+# forte (1,0; 0,005) tirava todos os pulos, mas a malha ficava atrasada no
+# movimento rápido (0,46 palma no pior quadro; você viu ao vivo).
+RTMLIB_EURO_PLACA_PULSO = (5.0, 0.1)
+RTMLIB_EURO_PLACA_DEDOS = (1.0, 0.01)
 # 0.5: com 0.7, mãos borradas pelo movimento eram descartadas (no teste com
 # o sinal "carro", 42% dos quadros ficavam sem nenhuma mão; com 0.5, 24%).
 # 0.3 (laboratório, 19/10/2026): nos 11 vídeos de teste, junto com o realce
@@ -47,6 +90,19 @@ MAX_MAOS = 2
 CONFIANCA_DETECCAO = 0.3
 # 0.3: no vídeo do sinal "carro", foi o valor que mais manteve as duas mãos.
 CONFIANCA_RASTREIO = 0.3
+# Anti-pulo (kara_sygna.visao.anti_pulo): um dedo que pula sozinho (mais que
+# este tanto, em tamanhos de palma) com o resto da mão parado volta para onde
+# estava, por até ANTI_PULO_MAX_QUADROS quadros seguidos. 0 = desligado.
+ANTI_PULO_LIMIAR = 0.35
+# TEMPORÁRIO (24/10/2026, teste do atraso da malha do RTMW-x): era 3.
+ANTI_PULO_MAX_QUADROS = 0
+# TEMPORÁRIO (24/10/2026, teste do atraso da malha do RTMW-x): False desliga o
+# FaceMesh (rosto) e o Pose (braços); os blocos deles ficam em zero, então as
+# IAs treinadas com rosto e braços podem errar mais. Para voltar: True.
+ROSTO_E_CORPO = True
+# TEMPORÁRIO (mesmo teste): False desenha as mãos sem a "Suavização das mãos"
+# das Configurações (só o One-Euro do detector). Para voltar: True.
+SUAVIZAR_DESENHO_MAOS = False
 # O detector de mãos recebe uma cópia da imagem com a pele clara e o resto
 # escuro (a cor da pele é medida no rosto), para as mãos se destacarem da
 # roupa. Só o detector vê essa cópia; a tela mostra a imagem normal.
@@ -60,6 +116,11 @@ REALCE_PELE_ESCURO = 0.1
 # 0.8 (laboratório, 19/10/2026): nos vídeos de teste, a mão sumida caiu de
 # 37% para 25% sozinha, sem piorar nenhum sinal.
 MEMORIA_MAO_S = 0.8
+# Com o rtmlib (RTMW...), que segue a mão sozinho, a memória ao vivo é curta:
+# a malha some logo quando a mão sai da tela (com 0,8 s ela ficava um pouco
+# atrasada). Só ao vivo: a máscara do treino continua com MEMORIA_MAO_S, igual
+# para todos os detectores.
+MEMORIA_MAO_RTMLIB_S = 0.3
 
 # MediaPipe Pose (braços): 0 = modelo leve (~13 ms por quadro), 1 = completo.
 COMPLEXIDADE_POSE = 0
@@ -100,6 +161,10 @@ QUADROS_PARA_LIBERAR_SEM_VOTO = 60
 # e 0.5 s foram os melhores nos vídeos de teste.
 PORTAO_MOVIMENTO_LIMITE = 0.8
 PORTAO_MOVIMENTO_JANELA_S = 0.5
+# O movimento dos primeiros segundos depois que as mãos aparecem não abre o
+# portão (é a subida das mãos até a posição). 26/10/2026, nos vídeos de teste:
+# 0,3 manteve o carro e a casa; 0,5 já perdia a casa no escuro (80% → 57%).
+PORTAO_SUBIDA_S = 0.3
 # Região entre as mãos (kara_sygna.ia.regiao): num sinal de duas mãos, o voto
 # não vale se as mãos estiverem bem mais longe uma da outra do que nas
 # gravações (percentil 95 + esta folga, em larguras de ombro). O lugar do sinal
@@ -194,6 +259,10 @@ VELOCIDADES_TREINO = (0.75, 1.33)
 # treino, o movimento também entra girado nestes ângulos (graus), para valer
 # para frente, para a esquerda, para cima... () = só como foi gravado.
 ANGULOS_DIRECAO_LIVRE = (45, 90, 135, 180, 225, 270, 315)
+# Redes neurais (GRU, LSTM, Conv1D; kara_sygna.ia.redes): quantas vezes o treino
+# passa por todas as janelas, e quantas janelas por passo.
+EPOCAS_REDE = 25
+LOTE_REDE = 256
 # Máscara no treino (kara_sygna.ia.mascara): cada gravação também entra com a
 # mão sumindo nestas partes dos quadros, como acontece ao vivo com a mão
 # borrada. () = desliga. Os buracos têm de MIN a MAX quadros (15 ≈ 0,5 s).
@@ -212,6 +281,11 @@ PREENCHER_BURACO_S = 0.5
 # Ao começar a ensinar, espera estes segundos antes de gravar (tempo para se
 # posicionar e já começar o sinal).
 SEGUNDOS_CONTAGEM_ENSINO = 3
+# "Gravação rápida" (botão ao lado dos segundos): a espera entre uma gravação
+# e a próxima (0 = sem parar). A primeira tem a contagem normal.
+PAUSA_GRAVACAO_RAPIDA_S = 0.0
+# Quantas vezes a "Gravação rápida" grava, se o campo estiver vazio ou errado.
+VEZES_GRAVACAO_RAPIDA = 4
 
 # ---------------------------------------------------------------------------
 # Interface

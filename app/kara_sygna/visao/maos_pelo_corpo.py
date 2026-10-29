@@ -16,6 +16,9 @@ principalmente com as mãos embaixo, perto da borda da imagem: no sinal
   fica a mais perto de um pulso do braço;
 * **mão perdida**: só é descartada a mão muito longe dos dois pulsos (mais
   de ``config.DISTANCIA_MAO_PULSO`` larguras de ombro);
+* **cópia da mão**: com duas mãos, a que ficou longe (mais de
+  ``config.DISTANCIA_MAO_PULSO``) do braço que recebeu é a mesma mão vista
+  duas vezes (ex.: a direita repetida no lado do braço esquerdo abaixado);
 * **lado**: cada mão recebe o lado do braço pela melhor combinação
   mão-braço (menor distância somada), e não pelo palpite do MediaPipe: nos
   vídeos testados, quando os dois discordavam, o braço acertou 82 de 83.
@@ -36,6 +39,54 @@ from kara_sygna.visao.quadro import POSE_DOS_SLOTS
 
 _VISIBILIDADE_OMBRO = 0.5
 _LADOS = ("esq", "dir")
+
+
+#: Sem o corpo: duas mãos cujos pontos ficam, em média, mais perto que isto
+#: (em palmas) são a mesma mão vista duas vezes.
+DISTANCIA_COPIA_SEM_CORPO = 0.5
+
+
+def sem_copia_sem_corpo(resultado_maos: Any, largura: int, altura: int) -> Any:
+    """Sem o corpo (Pose), tira a mão que é cópia de outra.
+
+    O Hand Landmarker às vezes acha a mesma mão duas vezes, no mesmo lugar
+    (no vídeo do defeito, 26/10/2026: duas "esquerdas" a 0,01 da imagem uma da
+    outra), e a cópia virava a outra mão. Com o corpo, os braços tiram a cópia;
+    sem ele, fica a de nota de lado maior. Mãos de verdade encostadas não
+    somem: a cópia fica em cima da mão inteira, não só num ponto.
+    """
+    listas = list(getattr(resultado_maos, "multi_hand_landmarks", None) or [])
+    validas = [lm for lm in listas if len(getattr(lm, "landmark", [])) >= 21]
+    if len(validas) != 2 or len(listas) != 2:
+        return resultado_maos
+    escala = np.array([largura, altura], dtype=np.float64)
+    a, b = (np.array([[p.x, p.y] for p in lm.landmark[:21]]) * escala for lm in listas)
+    palma = max(
+        float(np.linalg.norm(a[9] - a[0])), float(np.linalg.norm(b[9] - b[0])), 1.0
+    )
+    if float(np.mean(np.linalg.norm(a - b, axis=1))) / palma >= DISTANCIA_COPIA_SEM_CORPO:
+        return resultado_maos
+
+    lateralidades = list(getattr(resultado_maos, "multi_handedness", None) or [])
+
+    def nota(i: int) -> float:
+        if i >= len(lateralidades) or lateralidades[i] is None:
+            return 0.0
+        classes = getattr(lateralidades[i], "classification", [])
+        return float(classes[0].score) if classes else 0.0
+
+    fica = 0 if nota(0) >= nota(1) else 1
+    mundos = list(getattr(resultado_maos, "multi_hand_world_landmarks", None) or [])
+    lados = getattr(resultado_maos, "lados", None)
+    saida = SimpleNamespace(
+        multi_hand_landmarks=[listas[fica]],
+        multi_handedness=[lateralidades[fica]] if fica < len(lateralidades) else None,
+        multi_hand_world_landmarks=[mundos[fica]] if fica < len(mundos) else None,
+        descartadas=1,
+    )
+    if lados is not None and fica < len(lados):
+        saida.lados = [lados[fica]]
+    return saida
 
 
 def conferir_maos(
@@ -64,7 +115,7 @@ def conferir_maos(
     listas = list(getattr(resultado_maos, "multi_hand_landmarks", None) or [])
     pontos = getattr(getattr(resultado_corpo, "pose_landmarks", None), "landmark", None)
     if not listas or pontos is None or len(pontos) < 17:
-        return resultado_maos
+        return sem_copia_sem_corpo(resultado_maos, largura, altura)
 
     escala = np.array([largura, altura], dtype=np.float64)
 
@@ -108,20 +159,38 @@ def conferir_maos(
     # 3. Lado de cada mão: a combinação mão-braço com a menor distância somada.
     # Em 83 quadros de vídeo em que o lado do MediaPipe e o do braço
     # discordavam, o braço acertou 82 (pela posição da mão em relação ao nariz).
-    custos = sorted(
-        (
-            sum(
-                float(np.linalg.norm(maos[i] - pulsos[lado]))
-                for i, lado in zip(unicas, lados, strict=True)
-            ),
-            lados,
+    def combinar(indices: list[int]) -> dict[int, int]:
+        custos = sorted(
+            (
+                sum(
+                    float(np.linalg.norm(maos[i] - pulsos[lado]))
+                    for i, lado in zip(indices, lados, strict=True)
+                ),
+                lados,
+            )
+            for lados in permutations(range(len(_LADOS)), len(indices))
         )
-        for lados in permutations(range(len(_LADOS)), len(unicas))
-    )
-    ordem = sorted(unicas)
-    melhor = dict(zip(unicas, custos[0][1], strict=True)) if custos else {}
+        return dict(zip(indices, custos[0][1], strict=True)) if custos else {}
 
     lateralidades = list(getattr(resultado_maos, "multi_handedness", None) or [])
+    melhor = combinar(unicas)
+
+    # 4. Cópia da mesma mão: com duas mãos, uma delas longe do braço que
+    # recebeu (e a outra perto do dela). Nas letras feitas só com a mão
+    # direita (24/10/2026), a direita saía duas vezes e a cópia ia para o lado
+    # esquerdo, a 2,1-2,5 ombros do braço esquerdo abaixado. Em 8 vídeos de
+    # carro e casa, mão real nenhuma passou de 1,03 ombro do próprio braço.
+    if len(unicas) == 2:
+        copias = [
+            i
+            for i in unicas
+            if np.linalg.norm(maos[i] - pulsos[melhor[i]]) / largura_ombros > limite
+        ]
+        if len(copias) == 1:
+            unicas.remove(copias[0])
+            melhor = combinar(unicas)
+    ordem = sorted(unicas)
+
     mundos = list(getattr(resultado_maos, "multi_hand_world_landmarks", None) or [])
     return SimpleNamespace(
         multi_hand_landmarks=[listas[i] for i in ordem],

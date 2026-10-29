@@ -22,7 +22,7 @@ from kara_sygna.aplicacao.erros import (
     PalavraInvalidaError,
     SemDadosError,
 )
-from kara_sygna.aplicacao.etapas import Etapa, montar_etapas
+from kara_sygna.aplicacao.etapas import RITMO_NORMAL, Etapa, montar_etapas
 from kara_sygna.aplicacao.temporizador import (
     Evento,
     Fase,
@@ -44,8 +44,10 @@ from kara_sygna.interface.janela_previsualizacao import JanelaPrevisualizacao
 from kara_sygna.interface.janela_sinais import JanelaSinais
 from kara_sygna.interface.tarefas import ExecutorTk
 from kara_sygna.interface.texto_video import escrever as escrever_texto
+from kara_sygna.visao.anti_pulo import FiltroAntiPulo
+from kara_sygna.visao.caracteristicas import lado_de_cada_indice
 from kara_sygna.visao.detector_corpo import DetectorCorpo
-from kara_sygna.visao.detector_maos import DetectorMaos, tem_maos
+from kara_sygna.visao.detector_maos import RTMLIB, DetectorMaos, tem_maos
 from kara_sygna.visao.detector_rosto import DetectorRosto, ResultadoRosto
 from kara_sygna.visao.maos_pelo_corpo import conferir_maos
 from kara_sygna.visao.memoria_maos import MemoriaMaos
@@ -223,7 +225,11 @@ class JanelaPrincipal:
         self._detector_rosto = detector_rosto
         self._detector_corpo = detector_corpo
         self._executor_corpo = ThreadPoolExecutor(1, thread_name_prefix="corpo")
-        self._memoria_maos = MemoriaMaos()
+        rtmlib = getattr(detector, "tipo", "") in RTMLIB
+        self._memoria_maos = MemoriaMaos(
+            config.MEMORIA_MAO_RTMLIB_S if rtmlib else None
+        )
+        self._anti_pulo = FiltroAntiPulo()
         self._realce_pele = RealcePele()
         # Revezamento: vários detectores de mãos analisam quadros ao mesmo
         # tempo; rosto e braços numa thread só (veja visao/revezamento.py). O
@@ -231,7 +237,12 @@ class JanelaPrincipal:
         # fechados em fechar().
         self._revezamento: VisaoEmRevezamento | None = None
         self._leitor: LeitorEmThread | None = None
-        if config.REVEZAMENTO_DETECTORES > 1:
+        # Com o rtmlib (RTMW...) ou o Hand Landmarker, um detector de mãos só,
+        # mas ainda em thread própria: o rosto e os braços continuam em
+        # paralelo, e a câmera também (sem isso, tudo rodava em fila e a tela
+        # ficava lenta).
+        um_detector = rtmlib or getattr(detector, "tipo", "") == "landmarker"
+        if config.REVEZAMENTO_DETECTORES > 1 or um_detector:
             maos = [detector] + [
                 DetectorMaos() for _ in range(config.REVEZAMENTO_DETECTORES - 1)
             ]
@@ -337,6 +348,19 @@ class JanelaPrincipal:
         self._pre_ligado = tk.BooleanVar(master=raiz, value=False)
         self._pre_nome = tk.StringVar(master=raiz)
         self._direcao_livre = tk.BooleanVar(master=raiz, value=False)
+        # Ligado: o sinal é gravado 3 vezes (devagar, médio, rápido).
+        # Desligado: uma vez só, "normal".
+        self._ritmos_ligados = tk.BooleanVar(master=raiz, value=True)
+        # Gravação rápida: grava N vezes seguidas, com uma pausa curta entre elas.
+        self._gravacao_rapida = tk.BooleanVar(master=raiz, value=False)
+        self._vezes_rapida = tk.StringVar(
+            master=raiz, value=str(config.VEZES_GRAVACAO_RAPIDA)
+        )
+        self._pausa_entre_etapas: float | None = None
+        # Todos os quadros: no ensino, grava cada quadro, mesmo com a mão parada
+        # (sem isso, a mão parada só entra a cada 0,5 s).
+        self._todos_quadros = tk.BooleanVar(master=raiz, value=True)
+        self._primeira_etapa = True
         self._sinal_atual = tk.StringVar(
             master=raiz,
             value="AGUARDANDO SINAL",
@@ -1287,6 +1311,54 @@ class JanelaPrincipal:
             highlightcolor="#00D7FF",
         ).pack(side="left", ipady=4)
 
+        # Gravação rápida, ao lado dos segundos: grava N vezes seguidas, sem
+        # parar entre elas; cada vez vira uma gravação separada.
+        tk.Checkbutton(
+            linha_tempo,
+            text="GRAVAÇÃO RÁPIDA",
+            variable=self._gravacao_rapida,
+            bg="#111B2D",
+            fg="#DCE8FA",
+            selectcolor="#080D18",
+            activebackground="#111B2D",
+            activeforeground="#F1F7FF",
+            font=("Arial", 8, "bold"),
+            cursor="hand2",
+        ).pack(side="left", padx=(18, 4))
+        tk.Spinbox(
+            linha_tempo,
+            from_=2,
+            to=20,
+            width=3,
+            textvariable=self._vezes_rapida,
+            justify="center",
+            font=("Arial", 11),
+            bg="#080D18",
+            fg="#F1F7FF",
+            buttonbackground="#1B2940",
+            insertbackground="#00D7FF",
+            relief="flat",
+        ).pack(side="left", ipady=3)
+        tk.Label(
+            linha_tempo,
+            text="VEZES SEM PARAR",
+            bg="#111B2D",
+            fg="#7186A8",
+            font=("Arial", 8, "bold"),
+        ).pack(side="left", padx=(6, 0))
+        tk.Checkbutton(
+            linha_tempo,
+            text="TODOS OS QUADROS",
+            variable=self._todos_quadros,
+            bg="#111B2D",
+            fg="#DCE8FA",
+            selectcolor="#080D18",
+            activebackground="#111B2D",
+            activeforeground="#F1F7FF",
+            font=("Arial", 8, "bold"),
+            cursor="hand2",
+        ).pack(side="left", padx=(18, 0))
+
         tk.Label(
             linha_tempo,
             text=(
@@ -1525,6 +1597,20 @@ class JanelaPrincipal:
             cursor="hand2",
         ).pack(side="left", padx=(10, 0))
 
+        # Ritmos: ligado = devagar, médio e rápido; desligado = uma vez, normal.
+        tk.Checkbutton(
+            ensinar,
+            text="Ritmos (devagar, médio, rápido)",
+            variable=self._ritmos_ligados,
+            bg="#111B2D",
+            fg="#DCE8FA",
+            selectcolor="#080D18",
+            activebackground="#111B2D",
+            activeforeground="#F1F7FF",
+            font=("Arial", 9, "bold"),
+            cursor="hand2",
+        ).pack(anchor="w", padx=12, pady=(0, 10))
+
         self._botao_estilizado(
             ensinar,
             "COMEÇAR A ENSINAR (ENTER)",
@@ -1749,17 +1835,36 @@ class JanelaPrincipal:
             # Só liga; para desligar, use a lista de sinais aprendidos.
             self._controlador.marcar_direcao_livre(palavra, True)
         # Pré-sinal uma vez e o sinal em cada ritmo (veja aplicacao/etapas.py).
-        self._etapas = montar_etapas(palavra, pre, duracao)
+        ritmos = config.RITMOS_ENSINO if self._ritmos_ligados.get() else RITMO_NORMAL
+        self._pausa_entre_etapas = None
+        if self._gravacao_rapida.get():
+            # N vezes seguidas, cada uma uma gravação separada, com pausa curta.
+            ritmos = ritmos * self._ler_vezes_rapida()
+            self._pausa_entre_etapas = config.PAUSA_GRAVACAO_RAPIDA_S
+        self._etapas = montar_etapas(palavra, pre, duracao, ritmos)
+        self._primeira_etapa = True
         self._proxima_etapa()
+
+    def _ler_vezes_rapida(self) -> int:
+        """Quantas vezes a Gravação rápida grava (de 2 a 20)."""
+        try:
+            vezes = int(self._vezes_rapida.get())
+        except ValueError:
+            vezes = config.VEZES_GRAVACAO_RAPIDA
+        return max(2, min(20, vezes))
 
     def _proxima_etapa(self) -> None:
         """Começa a contagem da próxima etapa do ensino."""
         self._etapa_atual = etapa = self._etapas.pop(0)
-        self._temporizador.iniciar(etapa.duracao)
+        # Gravação rápida: só a primeira tem a contagem normal; depois, pausa curta.
+        contagem = None if self._primeira_etapa else self._pausa_entre_etapas
+        self._primeira_etapa = False
+        self._temporizador.iniciar(etapa.duracao, contagem)
         tempo = "até parar" if etapa.duracao is None else f"por {etapa.duracao:g} s"
+        espera = config.SEGUNDOS_CONTAGEM_ENSINO if contagem is None else contagem
         self._status.set(
             f"Prepare “{etapa.legenda}”: a gravação começa em "
-            f"{config.SEGUNDOS_CONTAGEM_ENSINO} s e vai {tempo}."
+            f"{espera:g} s e vai {tempo}."
         )
 
     def _comecar_gravacao(self) -> None:
@@ -1768,7 +1873,10 @@ class JanelaPrincipal:
         try:
             self._status.set(
                 self._controlador.iniciar_ensino(
-                    etapa.nome, etapa.tipo, etapa.pre_sinal
+                    etapa.nome,
+                    etapa.tipo,
+                    etapa.pre_sinal,
+                    todos_quadros=self._todos_quadros.get(),
                 )
             )
         except ErroAplicacao as erro:
@@ -2022,6 +2130,9 @@ class JanelaPrincipal:
         maos_detectadas = conferir_maos(
             maos_detectadas, resultado_corpo, largura_q, altura_q
         )
+        # Um dedo que pulou sozinho (o resto da mão parado) volta para o lugar,
+        # no desenho e nos dados da IA.
+        maos_detectadas = self._anti_pulo.aplicar(maos_detectadas, largura_q / altura_q)
         resultado_maos = self._memoria_maos.aplicar(maos_detectadas)
 
         # Os botões de exibição só escondem o desenho.
@@ -2063,9 +2174,11 @@ class JanelaPrincipal:
             self._suavizador_rosto.limpar("rosto")
 
         if visual["mostrar_maos"]:
-            if tem_maos(resultado_maos):
+            if tem_maos(resultado_maos) and config.SUAVIZAR_DESENHO_MAOS:
                 resultado_maos_visual = copy.deepcopy(resultado_maos)
-
+                # Cada mão com o histórico do seu lado. (Antes era pela ordem na
+                # lista: quando a ordem trocava, uma mão era puxada para a outra.)
+                lado_do_indice = lado_de_cada_indice(resultado_maos)
                 for indice, mao in enumerate(
                     resultado_maos_visual.multi_hand_landmarks
                 ):
@@ -2074,7 +2187,7 @@ class JanelaPrincipal:
                         dtype=np.float32,
                     )
                     suavizadas = self._suavizador_maos.suavizar(
-                        f"mao_{indice}", coordenadas
+                        f"mao_{lado_do_indice.get(indice, indice)}", coordenadas
                     )
 
                     for ponto, coordenada in zip(mao.landmark, suavizadas):

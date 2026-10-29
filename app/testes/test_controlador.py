@@ -95,6 +95,23 @@ def test_ensino_usa_1_a_cada_n_quadros(ctrl, rng, monkeypatch):
     assert ctrl.repositorio.contagem_por_sinal() == {"oi": 5}
 
 
+def test_ensino_com_todos_os_quadros_grava_a_mao_parada(ctrl, rng, monkeypatch):
+    """Letra parada (24/10/2026): o filtro "mudanca" quase não gravava nada."""
+    monkeypatch.setattr(config, "MODO_QUADROS", "mudanca")
+    parado = _quadro(rng)
+    ctrl.iniciar_ensino("s")
+    for _ in range(10):
+        ctrl.processar_quadro(parado)
+    ctrl.parar()
+    poucos = ctrl.repositorio.contagem_por_sinal()["s"]
+    assert poucos < 10  # só o que mudou
+    ctrl.iniciar_ensino("s", todos_quadros=True)
+    for _ in range(10):
+        ctrl.processar_quadro(parado)
+    ctrl.parar()
+    assert ctrl.repositorio.contagem_por_sinal()["s"] == poucos + 10
+
+
 def test_reconhecimento_usa_1_a_cada_n_quadros_sem_repetir_confirmacao(
     ctrl, rng, monkeypatch
 ):

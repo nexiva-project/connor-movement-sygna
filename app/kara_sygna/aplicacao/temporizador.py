@@ -84,6 +84,7 @@ class TemporizadorEnsino:
         self._relogio = relogio
         self.fase = Fase.PARADO
         self.duracao_s: float | None = None
+        self._contagem_agora = self.contagem_s
         self._inicio = 0.0
 
     @property
@@ -91,14 +92,18 @@ class TemporizadorEnsino:
         """Diz se está contando ou gravando."""
         return self.fase is not Fase.PARADO
 
-    def iniciar(self, duracao_s: float | None) -> None:
+    def iniciar(self, duracao_s: float | None, contagem_s: float | None = None) -> None:
         """Começa a contagem.
 
         Args:
             duracao_s: Quanto tempo gravar depois da contagem, ou ``None``
                 para gravar até o usuário parar.
+            contagem_s: Espera antes de gravar só desta vez (ex.: a pausa curta
+                entre as gravações da "Gravação rápida"). Padrão: a do
+                temporizador.
         """
         self.duracao_s = duracao_s
+        self._contagem_agora = self.contagem_s if contagem_s is None else contagem_s
         self.fase = Fase.CONTAGEM
         self._inicio = self._relogio()
 
@@ -109,9 +114,9 @@ class TemporizadorEnsino:
     def atualizar(self) -> Evento:
         """Avança o tempo; chame a cada quadro da câmera."""
         decorrido = self._relogio() - self._inicio
-        if self.fase is Fase.CONTAGEM and decorrido >= self.contagem_s:
+        if self.fase is Fase.CONTAGEM and decorrido >= self._contagem_agora:
             self.fase = Fase.GRAVANDO
-            self._inicio += self.contagem_s
+            self._inicio += self._contagem_agora
             return Evento.COMECAR
         if (
             self.fase is Fase.GRAVANDO
@@ -129,7 +134,7 @@ class TemporizadorEnsino:
             ``None`` se estiver parado ou gravando sem tempo definido.
         """
         if self.fase is Fase.CONTAGEM:
-            limite = self.contagem_s
+            limite = self._contagem_agora
         elif self.fase is Fase.GRAVANDO and self.duracao_s is not None:
             limite = self.duracao_s
         else:
